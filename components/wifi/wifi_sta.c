@@ -244,5 +244,14 @@ void wifi_sta_disconnect(){
     ESP_LOGI(TAG_WIFI, "***********DISCONNECTING COMPLETE*********");
 }
 
+void socket_connect(){
+
+}
+
+
+void socket_disconnect(){
+
+}
+
 
 
