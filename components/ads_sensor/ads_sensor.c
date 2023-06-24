@@ -131,8 +131,7 @@ ads_sensor* ads_sensor_create(uint8_t id, i2c_dev_t* ads , ads111x_gain_t gain, 
         ESP_LOGE(TAG_TC,"Couldn't allocate memory for sensor");
         return NULL;
     }
-
-
+    
     sensor->ads = ads;
     sensor->id = id;
     sensor->mux = mux;

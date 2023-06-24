@@ -20,12 +20,12 @@
 #define TAG_SD "SD_CARD"
 
 #define MOUNT_POINT "/sdcard"
-#define DATA_FORMAT "%u,%x,%llu\n"
+#define DATA_FORMAT "%u,%d,%llu\n"
 #define MAX_CHAR_SIZE 128
 
 //--SPI-----------------------
-#define PIN_NUM_MISO  23
-#define PIN_NUM_MOSI  19
+#define PIN_NUM_MISO  19
+#define PIN_NUM_MOSI  23
 #define PIN_NUM_CLK   18
 #define PIN_NUM_CS    5
 

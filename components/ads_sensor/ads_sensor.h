@@ -22,7 +22,6 @@ typedef struct{
     i2c_dev_t *ads;
     ads111x_mux_t mux;
     ads111x_gain_t gain;
-    //char* file_name ???
 } ads_sensor;
 
 typedef struct {
