@@ -106,6 +106,16 @@ double get_compensated_temperature(compensated_thermocouple* tt){
     return _get_compensated_temperature(tt->tc->value, tt->tc->gain, tt->cj->value, tt->cj->gain);
 }
 
+i2c_dev_t* fake_ads_create(uint8_t address, ads111x_data_rate_t data_rate, ads111x_mode_t mode){
+    i2c_dev_t *ads = malloc(sizeof(i2c_dev_t));
+    memset(ads, 0, sizeof(i2c_dev_t));//MUITO IMPORTANTE !!!!
+
+    if (ads == NULL){
+        ESP_LOGE(TAG_TC,"Couldn't allocate memory for i2c device");
+        return NULL;
+    }
+    return ads;
+}
 
 i2c_dev_t* ads_create(uint8_t address, ads111x_data_rate_t data_rate, ads111x_mode_t mode){
     i2c_dev_t *ads = malloc(sizeof(i2c_dev_t));
@@ -119,6 +129,11 @@ i2c_dev_t* ads_create(uint8_t address, ads111x_data_rate_t data_rate, ads111x_mo
     ESP_ERROR_CHECK( ads111x_set_data_rate(ads, data_rate));
     ESP_ERROR_CHECK( ads111x_set_mode(ads, mode));
     return ads;
+}
+
+
+ads_sensor* fake_ads_sensor_create(uint8_t id, i2c_dev_t* ads , ads111x_gain_t gain, ads111x_mux_t mux){
+    return ads_sensor_create(id,ads,gain,mux);
 }
 
 ads_sensor* ads_sensor_create(uint8_t id, i2c_dev_t* ads , ads111x_gain_t gain, ads111x_mux_t mux){
@@ -148,15 +163,23 @@ compensated_thermocouple * themocouple_create(ads_sensor *tc, ads_sensor *cj){
 }
 
 
-void wait_while_busy(ads_sensor* sensor){
+void wait_while_busy(i2c_dev_t* ads){
     bool busy;
     uint16_t busy_count = 0;
     do{
-        ESP_ERROR_CHECK(ads111x_is_busy(sensor->ads, &busy));
+        ESP_ERROR_CHECK(ads111x_is_busy(ads, &busy));
         busy_count+=1;
-        vTaskDelay(pdMS_TO_TICKS(5));
     }while(busy);
     ESP_LOGD(TAG_TC,"Busy count: %d\n", busy_count);
+}
+
+
+esp_err_t fake_ads_sensor_read(ads_sensor* sensor){
+    sensor->value = rand()%32768;
+    sensor->timestamp = esp_timer_get_time();
+    
+    // ESP_LOGI(TAG_TC,"FAKE read ADC[%u].%u raw value: {%d} - {%x}",sensor->ads->addr,sensor->mux, sensor->value, sensor->value);
+    return ESP_OK;
 }
 
 
@@ -165,35 +188,18 @@ esp_err_t ads_sensor_read(ads_sensor* sensor){
     bool busy;
     uint16_t busy_count = 0;
 
-    // ads111x_get_gain(sensor->ads, &ganho);
-    // printf("\n\nGanho antes: %d\n", ganho);
-
-
-    // printf("\nSetting Ganho para: %d\n", sensor->gain);
     ESP_ERROR_CHECK( ads111x_set_input_mux(sensor->ads, sensor->mux));
-    do{
-        ads111x_is_busy(sensor->ads, &busy);
-        busy_count+=1;
-
-    }while(busy);
+    wait_while_busy(sensor->ads);
     
     ESP_ERROR_CHECK( ads111x_set_gain(sensor->ads,sensor->gain));
-    // ads111x_get_gain(sensor->ads, &ganho);
-    do{
-        ads111x_is_busy(sensor->ads, &busy);
-        busy_count+=1;
-
-    }while(busy);
-    
-
-
+    wait_while_busy(sensor->ads);
     
     esp_err_t err = ads111x_get_value(sensor->ads, &raw);
     
     if(err == ESP_OK){
         sensor->value = raw;
         sensor->timestamp = esp_timer_get_time();
-        ESP_LOGI(TAG_TC,"Read ADC[%u].%u raw value: {%d} - {%x}",sensor->ads->addr,sensor->mux, raw, raw);
+        // ESP_LOGI(TAG_TC,"Read ADC[%u].%u raw value: {%d} - {%x}",sensor->ads->addr,sensor->mux, raw, raw);
     }
     else
         ESP_LOGE(TAG_TC,"Could not read ADC[%u].%u",sensor->ads->addr,sensor->mux);

@@ -17,7 +17,7 @@ esp_err_t create_file(const char *path) {
 }
 
 esp_err_t write_on_file(const char *path, char *data) {
-    ESP_LOGI(TAG_SD, "Opening file %s", path);
+    // ESP_LOGI(TAG_SD, "Opening file %s", path);
     FILE *f = fopen(path, "a");  // Open file in append mode
     if (f == NULL) {
         ESP_LOGE(TAG_SD, "Failed to open file for writing");

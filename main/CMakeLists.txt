@@ -5,5 +5,6 @@ idf_component_register(SRCS "main.c"
                        "../components/ads111x" 
                        "../components/i2cdev" 
                        "../components/sd_card" 
-                       "../components/<esp_idf_lib_helpers"
+                       "../components/esp_idf_lib_helpers"
+                       "../components/ds3231"
                        )

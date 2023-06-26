@@ -5,23 +5,34 @@
 #include <stdio.h>
 #include "esp_log.h"
 #include <string.h>
+
 #include "esp_netif.h"
 #include "esp_wifi.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
-#include "esp_err.h"
-#include "nvs_flash.h"
-
 #include <freertos/task.h>
 
+#include "esp_err.h"
+#include "nvs_flash.h"
+#include "esp_system.h"
+
+#include <sys/socket.h>
+#include <netdb.h>
 
 
-#define WIFI_SSID      "aaaaaaaaa"
-#define WIFI_PASS      "123"
-#define MAXIMUM_RETRY  5
+#define WIFI_SSID      CONFIG_EXAMPLE_WIFI_SSID
+#define WIFI_PASS      CONFIG_EXAMPLE_WIFI_PASSWORD
+#define MAXIMUM_RETRY  CONFIG_EXAMPLE_WIFI_CONN_MAX_RETRY
+
+
+#define SERVER_IP  "192.168.1.130"
+#define SERVER_PORT  23
+#define BUFFER_SIZE  1024
 
 #define TAG_WIFI "WiFI STA"
+#define TAG_SOCK "SOCKET"
 
 
 static char *print_disconnection_error(wifi_err_reason_t reason);
@@ -37,7 +48,8 @@ esp_err_t wifi_sta_init();
 
 esp_err_t wifi_sta_connect();
 
-void wifi_sta_disconnect();
+void _wifi_sta_disconnect();
 
-
+esp_err_t stream_data(int sock, char* data, uint8_t retries );
+esp_err_t socket_connect(int sock);
 #endif

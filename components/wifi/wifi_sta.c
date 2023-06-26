@@ -96,6 +96,7 @@ esp_err_t initialize_nvs(void){
 static void retry_connection(wifi_event_sta_disconnected_t *wifi_event_sta_disconnected, uint8_t* current_retry){
 
 }
+
 static void event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data){
     static uint8_t s_retry_num = 0;
 
@@ -237,20 +238,132 @@ esp_err_t wifi_sta_connect(){
     return ESP_FAIL;
 }
 
-void wifi_sta_disconnect(){
+void _wifi_sta_disconnect(){
     ESP_LOGI(TAG_WIFI, "**********DISCONNECTING FROM %s*********", WIFI_SSID);
     ESP_ERROR_CHECK(esp_wifi_disconnect());
     ESP_ERROR_CHECK(esp_wifi_stop());
     ESP_LOGI(TAG_WIFI, "***********DISCONNECTING COMPLETE*********");
 }
 
-void socket_connect(){
+esp_err_t socket_connect(int sock){
+    char server_ip[] = SERVER_IP;
+    int server_port = SERVER_PORT;
+    struct sockaddr_in server_addr;
 
+    // struct sockaddr_in* p_server_addr = &server_addr;
+
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(server_port);
+    server_addr.sin_addr.s_addr = inet_addr(server_ip);
+
+    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0){
+        ESP_LOGE(TAG_SOCK, "Failed to connect to server");
+        close(sock);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG_SOCK, "Socket connected");
+    return ESP_OK;
 }
 
 
 void socket_disconnect(){
 
+}
+
+
+off_t getFileSize(const char *filename) {
+    struct stat st;
+    if (stat(filename, &st) == 0) {
+        return st.st_size;
+    } else {
+        ESP_LOGE(TAG_SOCK, "Failed to get file size of %s", filename);
+        return 0;
+    }
+}
+
+
+esp_err_t start_file_transaction(int sock, const char* file_name, off_t file_size, uint8_t retries ){
+
+    char msg[BUFFER_SIZE];
+
+    snprintf(msg, sizeof(msg),"*,%s,%lu",file_name,file_size);
+
+    if(stream_data(sock, msg, retries)){
+
+        if(recv(sock, msg, sizeof(msg), 0)){
+            ESP_LOGI(TAG_SOCK, "Received confirmation from the server");
+            return ESP_OK;
+        }
+        ESP_LOGE(TAG_SOCK, "Didn't receive confirmation from the server");
+    }
+    return ESP_FAIL;
+}
+
+
+esp_err_t stream_file(int sock, const char* file_path, const char* file_name, uint8_t retries ){
+    
+    FILE * data_source = fopen(file_path, "rb");
+
+    if(data_source == NULL){
+        ESP_LOGE(TAG_SOCK, "Failed to open the file: %s", file_path);
+        return ESP_FAIL;
+    }
+
+   off_t file_size = getFileSize(file_path);
+
+    if(!file_size){
+        ESP_LOGW(TAG_SOCK, "File %s is empty", file_path);
+        return ESP_OK;
+    }
+
+    char buffer[BUFFER_SIZE];
+    size_t bytes_read;
+    off_t total_sent = 0;
+
+    if(start_file_transaction(sock, file_name, file_size, retries) != ESP_OK){
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG_SOCK, "Starting file %s transfer", file_path);
+    do{
+        bytes_read = fread(buffer, 1, BUFFER_SIZE, data_source);
+       
+        if(!bytes_read){
+            ESP_LOGI(TAG_SOCK, "Reached end of file %s", file_path);
+            break;
+        }
+
+        if(send(sock, buffer, strlen(buffer), 0) > 0){
+            ESP_LOGD(TAG_SOCK, "Data sent: [%s]", buffer);
+            total_sent += BUFFER_SIZE;
+            ESP_LOGI(TAG_SOCK, "FILE transfer: %lu %%", (100*total_sent/file_size));
+        }
+        else{
+            ESP_LOGE(TAG_SOCK, "Failed to send data [%s]",buffer);
+            return ESP_FAIL;
+        }
+    }while(bytes_read == BUFFER_SIZE);
+
+    fclose(data_source);
+    return ESP_OK;
+}
+
+
+esp_err_t stream_data(int sock, char* data, uint8_t retries ){
+
+    while(retries--){
+        if(send(sock, data, strlen(data), 0) >= 0){
+            ESP_LOGI(TAG_SOCK, "Data sent: [%s]", data);
+            return ESP_OK;
+        }
+        
+        ESP_LOGE(TAG_SOCK, "Failed to send [%s]",data);
+        ESP_LOGI(TAG_SOCK, "Retrying to send data... {%u}",retries);
+    }
+
+    ESP_LOGE(TAG_SOCK, "Used all the retries attempts");
+    return ESP_FAIL;
 }
 
 

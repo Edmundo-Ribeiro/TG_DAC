@@ -104,4 +104,11 @@ void compensated_thermocouple_read(compensated_thermocouple* t);
 
 sensor_data extract_data(ads_sensor* sensor);
 
+
+esp_err_t fake_ads_sensor_read(ads_sensor* sensor);
+i2c_dev_t* fake_ads_create(uint8_t address, ads111x_data_rate_t data_rate, ads111x_mode_t mode);
+
+ads_sensor* fake_ads_sensor_create(uint8_t id, i2c_dev_t* ads , ads111x_gain_t gain, ads111x_mux_t mux);
+
+
 #endif

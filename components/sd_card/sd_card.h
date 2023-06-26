@@ -20,7 +20,6 @@
 #define TAG_SD "SD_CARD"
 
 #define MOUNT_POINT "/sdcard"
-#define DATA_FORMAT "%u,%d,%llu\n"
 #define MAX_CHAR_SIZE 128
 
 //--SPI-----------------------

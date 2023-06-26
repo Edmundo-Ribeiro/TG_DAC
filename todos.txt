@@ -1,0 +1,25 @@
+fazer:
+X enviar dados por socket
+X servidor para receber dados do socket
+separar leituras em arquivos diferentes /pastas
+
+sincronizar relogio do esp com rtc
+    no startup verificar se rtc foi desligado
+        se foi, gerar Warning
+        se estiver conectado a internet pegar time
+        sincronizar relogios
+    
+    se rtc e time estiverem com 1 min de ddiferença
+        sincronizar relogios
+
+    
+botoes/leds para iniciar/parar/apagar arquivos/ 
+
+X enviar arquivos pelo socket diretamente
+
+guardar dados no banco de dados
+
+buscar hora na internet
+
+
+
