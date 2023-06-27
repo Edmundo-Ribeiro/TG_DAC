@@ -2,6 +2,7 @@ fazer:
 X enviar dados por socket
 X servidor para receber dados do socket
 separar leituras em arquivos diferentes /pastas
+    criar pastas com o dia/hh_mm_ss -> arquivos separados por sensor
 
 sincronizar relogio do esp com rtc
     no startup verificar se rtc foi desligado
@@ -13,7 +14,7 @@ sincronizar relogio do esp com rtc
         sincronizar relogios
 
     
-botoes/leds para iniciar/parar/apagar arquivos/ 
+botoes/leds para iniciar/parar/apagar arquivos/ conectar/desconctar da internet
 
 X enviar arquivos pelo socket diretamente
 

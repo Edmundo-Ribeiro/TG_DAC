@@ -14,8 +14,9 @@
 #include "esp_log.h"
 #include "wifi_sta.h"
 
+bool flying = false;
 
-static int max(int a, int b) { return (a > b ? a : b); }
+// static int max(int a, int b) { return (a > b ? a : b); }
 static int min(int a, int b) { return (a < b ? a : b); }
 
 #ifndef APP_CPU_NUM
@@ -97,7 +98,7 @@ static void task_read_ads_sensors(void* pvParams ){
         // double temperature = _get_compensated_temperature(sensors[2]->value,sensors[2]->gain,sensors[0]->value,sensors[0]->gain);
         // ESP_LOGI(TAG_TC, "\n\nTEMPERATURE: %lf C\n", temperature);
 
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(300));
     }
        
 }
@@ -111,7 +112,7 @@ typedef enum{
     SD_CARD_AND_STREAM_MODE
 } data_saving_mode;
 
-#define STORE_MODE STREAM_MODE
+#define STORE_MODE FAKE_SD_CARD_MODE
 
 
 
@@ -188,6 +189,27 @@ static void task_store_data(void *pvParams){
 
 
 
+void task_wifi_connection_check(void *pvParameters) {
+    wifi_ap_record_t ap_info;
+    while (1) {
+        // Check if Wi-Fi connection is still active
+        
+        if (esp_wifi_sta_get_ap_info(&ap_info)== ESP_OK) {
+            ESP_LOGI(TAG_MAIN,"Wi-Fi connection with %s is still active...",WIFI_SSID);
+        } else {
+            ESP_LOGW(TAG_MAIN,"Wi-Fi connection with %s is lost", WIFI_SSID);
+            //fazer algo a respeito
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(5000));  
+    }
+}
+
+
+
+
+
+
 // void app_main(){
 
     
@@ -204,8 +226,8 @@ static void task_store_data(void *pvParams){
 //     wifi_sta_connect();
 
 
-//     i2c_dev_t* ds_clock;
-//     ds3231_init_desc(ds_clock, DS3231_ADDR, I2C_PORT, SDA_IO_NUM, SCL_IO_NUM);
+//     // i2c_dev_t* ds_clock;
+//     // ds3231_init_desc(ds_clock, DS3231_ADDR, I2C_PORT, SDA_IO_NUM, SCL_IO_NUM);
 
 
 
@@ -246,14 +268,29 @@ static void task_store_data(void *pvParams){
 
 //     xTaskCreatePinnedToCore(task_read_ads_sensors, "task_read_ads_sensors", configMINIMAL_STACK_SIZE * 10, (void *)params, 5, NULL, APP_CPU_NUM);
     
-//     xTaskCreatePinnedToCore(task_store_data, "task_store_data", configMINIMAL_STACK_SIZE * 10, (void *)sensor_data_queue, 6, NULL, PRO_CPU_NUM);
 
+//     xTaskCreatePinnedToCore(task_store_data, "task_store_data", configMINIMAL_STACK_SIZE * 10, (void *)sensor_data_queue, 6, NULL, PRO_CPU_NUM);
+//     xTaskCreatePinnedToCore(task_wifi_connection_check, "task_wifi_check", configMINIMAL_STACK_SIZE *5, NULL, 10, NULL, PRO_CPU_NUM);
 
 //     while (1){
 //         vTaskDelay(portMAX_DELAY);
 //     }
     
 // }
+
+
+esp_err_t sync_esp_to_rtc(i2c_dev_t* rtc){
+    struct tm rtc_current_time;
+    esp_err_t err;
+    if((err=ds3231_get_time(rtc, &rtc_current_time)) != ESP_OK){
+        ESP_LOGE("TIME", "Could not get time from ds3231");
+        return err;
+    }
+
+
+return ESP_OK;
+
+}
 
 
 #include <stdio.h>
@@ -293,17 +330,81 @@ void on_got_time(struct timeval *tv)
   esp_restart();
 }
 
-void app_main(void)
-{
-  time_t now = 0;
-  time(&now);
-  print_time(now, "Beginning of application");
 
-   wifi_sta_init();
+
+
+#include <time.h>
+
+void app_main(){
+
+    
+    if(i2cdev_init() != ESP_OK){
+        ESP_LOGE(TAG_TC, "could not initialize the i2c interface");
+        return;
+    }
+
+
+    time_t now;
+    struct tm time_info;
+    time(&now);
+    localtime_r(&now, &time_info);
+
+    
+    logi_time(&time_info, "Hora inicial do esp:");
+
+
+
+    i2c_dev_t _ds_clock;
+    i2c_dev_t *ds_clock = &_ds_clock;
+
+    memset(ds_clock, 0, sizeof(i2c_dev_t));
+    ds3231_init_desc(ds_clock, I2C_PORT, SDA_IO_NUM, SCL_IO_NUM);
+    struct tm ds_time;
+
+
+    // // Set the desired time values in the struct tm
+    // time_info.tm_sec = 0;
+    // time_info.tm_min = 28;
+    // time_info.tm_hour = 16;
+    // time_info.tm_wday = 2;  // Wednesday (1-7, Sunday is 1)
+    // time_info.tm_mday = 26;
+    // time_info.tm_mon = 5;  // December (0-11, January is 0)
+    // time_info.tm_year = 123;  // 2023 - 1900 = 123
+
+    // ESP_ERROR_CHECK (ds3231_set_time(ds_clock, &time_info));
+    vTaskDelay(pdMS_TO_TICKS(10));
+    ESP_ERROR_CHECK(ds3231_get_time(ds_clock, &ds_time));
+    logi_time(&ds_time, "Hora inicial do ds3231:");
+    
+    
+
+    wifi_sta_init();
+
+
+    xTaskCreatePinnedToCore(task_start_sntp_system, "", configMINIMAL_STACK_SIZE *5, NULL, 4, NULL, PRO_CPU_NUM);
+    uint8_t a = 10;
+    while(a--){
+        printf("waiting... %u\n",a);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
     wifi_sta_connect();
 
-  sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
-  sntp_setservername(0, "pool.ntp.org");
-  sntp_init();
-  sntp_set_time_sync_notification_cb(on_got_time);
+    time_t up_time;
+    struct tm up_time_info;
+   
+    while(1){
+        time(&up_time);
+        localtime_r(&up_time, &up_time_info);
+
+        logi_time(&up_time_info, "Current time esp:");
+
+        ds3231_get_time(ds_clock, &up_time_info);
+        logi_time(&up_time_info, "Current time ds :");
+        // sntp_set_time_sync_notification_cb(on_got_time);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
 }
+
+
+

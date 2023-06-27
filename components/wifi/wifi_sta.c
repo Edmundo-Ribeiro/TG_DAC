@@ -4,7 +4,6 @@ const int CONNECTED_GOT_IP = BIT0;
 const int DISCONNECTED = BIT1;
 
 
-static EventGroupHandle_t wifi_events;
 
 static char *print_disconnection_error(wifi_err_reason_t reason){
     switch (reason){
@@ -93,17 +92,15 @@ esp_err_t initialize_nvs(void){
 }
 
 
-static void retry_connection(wifi_event_sta_disconnected_t *wifi_event_sta_disconnected, uint8_t* current_retry){
-
-}
 
 static void event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data){
     static uint8_t s_retry_num = 0;
 
     switch (event_id){
+        
 
         case WIFI_EVENT_STA_START:
-            ESP_LOGI(TAG_WIFI, "Connecting...\n");
+            ESP_LOGI(TAG_WIFI, "Connecting to %s\n",WIFI_SSID);
             esp_wifi_connect();
             break;
 
@@ -129,7 +126,7 @@ static void event_handler(void *event_handler_arg, esp_event_base_t event_base, 
                  if (s_retry_num < MAXIMUM_RETRY) {
                     esp_wifi_connect();
                     s_retry_num++;
-                    ESP_LOGI(TAG_WIFI, "retry to connect to the AP");
+                    ESP_LOGW(TAG_WIFI, "retry {%u} of {%u} to connect to the AP",s_retry_num,MAXIMUM_RETRY);
                     break;
                 }
             }
@@ -198,13 +195,14 @@ esp_err_t wifi_sta_init(){
     }
 
     ESP_LOGI(TAG_WIFI,"WiFi initialization done!");
+    wifi_events = xEventGroupCreate();
     return ESP_OK;
 }
 
 
 esp_err_t wifi_sta_connect(){
 
-    wifi_events = xEventGroupCreate();
+    // wifi_events = xEventGroupCreate();
     wifi_config_t wifi_config;
     memset(&wifi_config, 0, sizeof(wifi_config_t));
 
@@ -212,6 +210,8 @@ esp_err_t wifi_sta_connect(){
     strncpy((char *)wifi_config.sta.password, WIFI_PASS, sizeof(wifi_config.sta.password) - 1);
 
     esp_netif_t *esp_netif = esp_netif_create_default_wifi_sta();
+
+    
 
     //{
     // for static ip...
@@ -232,7 +232,7 @@ esp_err_t wifi_sta_connect(){
     EventBits_t result = xEventGroupWaitBits(wifi_events, CONNECTED_GOT_IP | DISCONNECTED, pdTRUE, pdFALSE, pdMS_TO_TICKS(5000));
    
     if (result == CONNECTED_GOT_IP){
-        ESP_LOGI(TAG_WIFI, "Connected to ap SSID:%s",WIFI_SSID);
+        ESP_LOGI(TAG_WIFI, "Connected to ap SSID:%s\n",WIFI_SSID);
         return ESP_OK;
     }
     return ESP_FAIL;
@@ -368,3 +368,84 @@ esp_err_t stream_data(int sock, char* data, uint8_t retries ){
 
 
 
+void time_sync_notification_cb(struct timeval *tv){
+    ESP_LOGI("Time","\n\n\n\t!TIME SYNC OCCURRED!\n\n\n");
+    
+
+    i2c_dev_t _ds_clock;
+    i2c_dev_t *ds_clock = &_ds_clock;
+    memset(ds_clock, 0, sizeof(i2c_dev_t));
+    ESP_ERROR_CHECK(ds3231_init_desc(ds_clock, 0, 21, 22));
+
+    ESP_ERROR_CHECK(set_rtc_with_esp_time(ds_clock));
+}
+
+void config_clock_system(){
+
+    setenv("TZ", "UTC+03", 1);  
+    tzset();
+    sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
+
+    sntp_set_time_sync_notification_cb(time_sync_notification_cb);
+
+}
+
+
+
+
+esp_err_t set_rtc_with_esp_time(i2c_dev_t* ds_clock){ 
+    time_t esp_time;
+    time(&esp_time);// get current esp time
+    struct tm ds_time;
+    //  = gmtime(&esp_time);
+    // printf("oi\n");
+    localtime_r(&esp_time, &ds_time);
+    return ds3231_set_time(ds_clock, &ds_time); // set the time of the ds3231
+}
+
+esp_err_t set_esp_time_with_rtc(i2c_dev_t* ds_clock){
+    struct tm ds_time;
+    esp_err_t err = ds3231_get_time(ds_clock, &ds_time);
+
+    if(err != ESP_OK) return err;
+
+    struct timeval tv;
+    tv.tv_sec = mktime(&ds_time);  // Convert struct tm to time_t
+    tv.tv_usec = 0;
+    settimeofday(&tv, NULL);
+
+    return err;
+}
+
+void task_start_sntp_system(void *pvParameters) {
+
+    config_clock_system();
+    sntp_sync_status_t sync_status;
+
+    ESP_LOGW("AAAA", "before the while(1)");
+    while (1) {
+        ESP_LOGW("AAAA", "before the wait");
+        EventBits_t result = xEventGroupWaitBits(wifi_events, CONNECTED_GOT_IP | DISCONNECTED, pdTRUE, pdFALSE, portMAX_DELAY);
+        ESP_LOGW("AAAA", "after the wait");
+
+        sync_status = sntp_get_sync_status();
+      
+        if(result == CONNECTED_GOT_IP){
+            if (!esp_sntp_enabled()) {
+
+            esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+            esp_sntp_setservername(0, "pool.ntp.org");
+            // sntp_set_sync_interval(1200000);
+            esp_sntp_init();
+            // vTaskDelete(NULL);
+            }
+        }
+
+    }
+}
+
+void logi_time(struct tm* time_p, char* msg){
+    char timeStr[64];
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", time_p);
+    ESP_LOGI("time:","%s: %s", msg,timeStr);
+}
