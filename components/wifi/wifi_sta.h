@@ -41,6 +41,7 @@
 
 static EventGroupHandle_t wifi_events;
 
+
 static char *print_disconnection_error(wifi_err_reason_t reason);
 
 // initialize the default NVS partition

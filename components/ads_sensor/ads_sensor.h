@@ -12,22 +12,26 @@
 #define SCL_IO_NUM 22
 //------------------------------------------------
 #define TAG_TC "Ads_sensor"
-
+#define MIN_READ_TIME 100
 
 
 typedef struct{
     uint8_t id;
     int16_t value; //last measured value
     uint64_t timestamp;//last measured value timestamp
+    uint64_t time_between_reads;//last measured value timestamp
     i2c_dev_t *ads;
     ads111x_mux_t mux;
     ads111x_gain_t gain;
+    char name[12];
+    char full_current_file_path[128];
 } ads_sensor;
 
 typedef struct {
     uint8_t id;
     int16_t value;
     uint64_t timestamp;
+    char full_current_file_path[128];
 } sensor_data;
 
 typedef struct{
@@ -93,8 +97,7 @@ double get_compensated_temperature(compensated_thermocouple* tt);
 
 i2c_dev_t* ads_create(uint8_t address, ads111x_data_rate_t data_rate, ads111x_mode_t mode);
 
-ads_sensor* ads_sensor_create(uint8_t id, i2c_dev_t* ads , ads111x_gain_t gain, ads111x_mux_t mux);
-
+ads_sensor* ads_sensor_create(char * name, uint8_t id, i2c_dev_t* ads , ads111x_gain_t gain, ads111x_mux_t mux,uint64_t time_interval );
 compensated_thermocouple * themocouple_create(ads_sensor *tc, ads_sensor *cj);
 
 
@@ -108,7 +111,6 @@ sensor_data extract_data(ads_sensor* sensor);
 esp_err_t fake_ads_sensor_read(ads_sensor* sensor);
 i2c_dev_t* fake_ads_create(uint8_t address, ads111x_data_rate_t data_rate, ads111x_mode_t mode);
 
-ads_sensor* fake_ads_sensor_create(uint8_t id, i2c_dev_t* ads , ads111x_gain_t gain, ads111x_mux_t mux);
 
 
 #endif

@@ -132,21 +132,27 @@ i2c_dev_t* ads_create(uint8_t address, ads111x_data_rate_t data_rate, ads111x_mo
 }
 
 
-ads_sensor* fake_ads_sensor_create(uint8_t id, i2c_dev_t* ads , ads111x_gain_t gain, ads111x_mux_t mux){
-    return ads_sensor_create(id,ads,gain,mux);
-}
 
-ads_sensor* ads_sensor_create(uint8_t id, i2c_dev_t* ads , ads111x_gain_t gain, ads111x_mux_t mux){
+ads_sensor* ads_sensor_create(char * name, uint8_t id, i2c_dev_t* ads , ads111x_gain_t gain, ads111x_mux_t mux,uint64_t time_interval ){
 
-    ads_sensor* sensor = malloc(sizeof(i2c_dev_t));
-
+    ads_sensor* sensor = (ads_sensor*) malloc(sizeof(ads_sensor));
     memset(sensor, 0, sizeof(ads_sensor));
-    
+
     if (sensor == NULL){
         ESP_LOGE(TAG_TC,"Couldn't allocate memory for sensor");
         return NULL;
     }
+
+
+    if(time_interval < MIN_READ_TIME){
+        ESP_LOGW(name, "Time between reads {%llu} lower that permited by MIN_READ_TIME {%d}",time_interval,MIN_READ_TIME );
+        sensor->time_between_reads = MIN_READ_TIME;
+    }else{
+        sensor->time_between_reads = time_interval;
+    }
+
     
+    strcpy(sensor->name,name);
     sensor->ads = ads;
     sensor->id = id;
     sensor->mux = mux;
@@ -220,3 +226,4 @@ sensor_data extract_data(ads_sensor* sensor){
     };
     return data;
 }
+

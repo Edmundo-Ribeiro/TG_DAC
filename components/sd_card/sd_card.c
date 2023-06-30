@@ -18,9 +18,12 @@ esp_err_t create_file(const char *path) {
 
 esp_err_t write_on_file(const char *path, char *data) {
     // ESP_LOGI(TAG_SD, "Opening file %s", path);
-    FILE *f = fopen(path, "a");  // Open file in append mode
+    uint8_t len = strlen(path)+strlen(MOUNT_POINT)+3;
+    char mounted_path[len];
+    snprintf(mounted_path, len,"%s/%s",MOUNT_POINT,path);
+    FILE *f = fopen(mounted_path, "a");  // Open file in append mode
     if (f == NULL) {
-        ESP_LOGE(TAG_SD, "Failed to open file for writing");
+        ESP_LOGE(TAG_SD, "Failed to open file %s for writing",mounted_path);
         return ESP_FAIL;
     }
     fprintf(f, "%s", data);  // Append the data to the end of the file

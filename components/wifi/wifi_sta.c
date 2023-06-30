@@ -422,11 +422,8 @@ void task_start_sntp_system(void *pvParameters) {
     config_clock_system();
     sntp_sync_status_t sync_status;
 
-    ESP_LOGW("AAAA", "before the while(1)");
     while (1) {
-        ESP_LOGW("AAAA", "before the wait");
         EventBits_t result = xEventGroupWaitBits(wifi_events, CONNECTED_GOT_IP | DISCONNECTED, pdTRUE, pdFALSE, portMAX_DELAY);
-        ESP_LOGW("AAAA", "after the wait");
 
         sync_status = sntp_get_sync_status();
       

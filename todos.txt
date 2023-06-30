@@ -4,7 +4,7 @@ X servidor para receber dados do socket
 separar leituras em arquivos diferentes /pastas
     criar pastas com o dia/hh_mm_ss -> arquivos separados por sensor
 
-sincronizar relogio do esp com rtc
+X sincronizar relogio do esp com rtc
     no startup verificar se rtc foi desligado
         se foi, gerar Warning
         se estiver conectado a internet pegar time
@@ -20,7 +20,7 @@ X enviar arquivos pelo socket diretamente
 
 guardar dados no banco de dados
 
-buscar hora na internet
+X buscar hora na internet
 
 
 
