@@ -1,5 +1,7 @@
 
 #include <ads_sensor.h>
+
+
 /*
 
 Voltage:	-6.404 to -3.554 mV	-3.554 to 4.096mV 4.096 to 16.397 mV	16.397 to 33.275 mV	 33.275 to 69.553 mV
@@ -189,6 +191,12 @@ esp_err_t fake_ads_sensor_read(ads_sensor* sensor){
 }
 
 
+uint64_t get_timestamp(){
+    struct timeval tv_now;
+    gettimeofday(&tv_now, "UTC+3");
+    return  (uint64_t)tv_now.tv_sec * 1000000L + (uint64_t)tv_now.tv_usec;  
+}
+
 esp_err_t ads_sensor_read(ads_sensor* sensor){
     int16_t raw = 0;
     bool busy;
@@ -204,7 +212,8 @@ esp_err_t ads_sensor_read(ads_sensor* sensor){
     
     if(err == ESP_OK){
         sensor->value = raw;
-        sensor->timestamp = esp_timer_get_time();
+        sensor->timestamp = get_timestamp();
+        // sensor->timestamp = esp_timer_get_time();
         // ESP_LOGI(TAG_TC,"Read ADC[%u].%u raw value: {%d} - {%x}",sensor->ads->addr,sensor->mux, raw, raw);
     }
     else

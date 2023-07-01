@@ -5,7 +5,7 @@
 #include "freertos/queue.h"
 #include "esp_log.h"
 #include <time.h>
-
+#include "driver/gpio.h"
 
 
 #include "ads_sensor.h"
@@ -34,7 +34,7 @@ typedef enum{
     FAKE_READ_SENSORS,
 } sensor_reading_mode;
 
-#define STORE_MODE SD_CARD_MODE
+#define STORE_MODE FAKE_SD_CARD_MODE
 #define DATA_MODE FAKE_READ_SENSORS
 //----------------------------------------------------------------
 
@@ -60,8 +60,6 @@ typedef enum{
     LM35_1 = 5,
     LM35_2 = 6
 } sensor_id;
-
-
 
 // Important defines here ----------------------------------------------------
 #define TAG_MAIN "MAIN"
@@ -219,10 +217,10 @@ static void task_read_ads_sensors(void* pvParams ){
 
 
     while(1){
-        ESP_LOGI(sensor->name,"--------------------------------------------------------------------------------");
+        // ESP_LOGI(sensor->name,"--------------------------------------------------------------------------------");
         
         space_available = uxQueueSpacesAvailable(sensor_data_queue);
-        ESP_LOGI(TAG_TC, "Spaces available in queue: %d",space_available );
+        // ESP_LOGI(TAG_TC, "Spaces available in queue: %d",space_available );
 
         if (!space_available){
             ESP_LOGW(TAG_TC, "Queue Full, couldn't send data to queue");
@@ -241,7 +239,7 @@ static void task_read_ads_sensors(void* pvParams ){
         ESP_LOGI(TAG_TC, "Sent data to Queue: [%u] %d - %llu = [%lf]mv", sensor->id,sensor->value,sensor->timestamp,raw_to_mv(sensor->value,sensor->gain) );
            
         
-        ESP_LOGI(sensor->name,"--------------------------------------------------------------------------------");
+        // ESP_LOGI(sensor->name,"--------------------------------------------------------------------------------");
 
         // double temperature = _get_compensated_temperature(sensors[2]->value,sensors[2]->gain,sensors[0]->value,sensors[0]->gain);
         // ESP_LOGI(TAG_TC, "\n\nTEMPERATURE: %lf C\n", temperature);
@@ -264,7 +262,7 @@ static void task_store_data(void *pvParams){
 
         // Wait for data in the queue
        
-        while (xQueueReceive(sensor_data_queue, &received_sensor, portMAX_DELAY)== pdPASS){
+        while(xQueueReceive(sensor_data_queue, &received_sensor, portMAX_DELAY)== pdPASS){
             
 
             snprintf(
@@ -293,8 +291,136 @@ static void task_store_data(void *pvParams){
 }
 
 
+
+    #define START_MESURES_BT GPIO_NUM_15
+#define STOP_MESURES_BT GPIO_NUM_4
+#define DELETE_FILES_BT GPIO_NUM_5
+
+const gpio_num_t BTNs[] = {
+    START_MESURES_BT,
+    STOP_MESURES_BT, 
+    DELETE_FILES_BT 
+};
+
+
+
+
+typedef struct {
+    gpio_num_t pin;
+    TickType_t last_press_time;
+    QueueHandle_t queue;
+} Button;
+
+typedef struct {
+
+    uint8_t handles_len;
+    TaskHandle_t *handles;
+    
+    QueueHandle_t queue;
+
+}task_btn_params;
+
+
+void gpio_isr_handler(void * arg){
+   
+    Button* button = (Button*)arg;
+    TickType_t current_time = xTaskGetTickCountFromISR();
+
+    // Perform debounce logic
+    if ((current_time - button->last_press_time) >= pdMS_TO_TICKS(500)) {
+        // Button press detected, send the button pin to the queue
+        xQueueSendFromISR(button->queue, &(button->pin), NULL);
+    }
+
+    button->last_press_time = current_time;
+
+}
+
+void configure_button(Button* button) {
+    gpio_config_t io_conf;
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_NEGEDGE;
+    io_conf.pin_bit_mask = (1ULL << button->pin);
+    gpio_config(&io_conf);
+
+    
+    gpio_isr_handler_add(button->pin, gpio_isr_handler, (void*)button);
+
+    // Initialize the last press time to the current tick count
+    button->last_press_time = xTaskGetTickCount();
+}
+
+
+
+ void suspend_tasks(TaskHandle_t * handles, uint8_t len){
+    eTaskState state;
+    uint8_t i;
+    uint8_t count = 0;
+    while(count != len){
+        count = 0;
+        for(i =0; i < len; i++){
+            state = eTaskGetState( handles[i] );
+            if(state == eBlocked ){
+                vTaskSuspend(handles[i]);
+                count +=1;
+            }else if(state == eSuspended){
+                count +=1;
+            }
+        }
+    }
+    
+}
+
+ void resume_tasks(TaskHandle_t * handles, uint8_t len){
+    for(uint8_t i =0; i < len;i++){
+        vTaskResume(handles[i]);
+    }
+}
+
+
+#define LED_PIN 2
+static void task_btns(void* _args){
+
+    task_btn_params* args = (task_btn_params*)_args;
+    gpio_num_t button_pin;
+
+
+    while (1) {
+ 
+        while(xQueueReceive(args->queue, &button_pin, portMAX_DELAY) == pdPASS) {
+          
+            switch (button_pin){
+
+                case START_MESURES_BT:
+                    ESP_LOGI(TAG_MAIN,"\n\n\tRESUMING READINGS...\n\n");
+                    resume_tasks(args->handles, args->handles_len);
+                    gpio_set_level(LED_PIN, 1);
+                    break;
+                case STOP_MESURES_BT:
+                    suspend_tasks(args->handles, args->handles_len);
+                    ESP_LOGI(TAG_MAIN,"\n\nREADINGS SUSPENDED...\n\n");
+                    gpio_set_level(LED_PIN, 0);
+                    break;
+                case DELETE_FILES_BT:
+                    break;
+           
+           default:
+            break;
+           }
+        }
+    }
+}
+
 void app_main(){
 
+     gpio_reset_pin(LED_PIN);
+    /* Set the GPIO as a push/pull output */
+    gpio_set_direction(LED_PIN, GPIO_MODE_OUTPUT);
+
+    // Turn on the LED
+    
 
     if(i2cdev_init() != ESP_OK){
         ESP_LOGE(TAG_TC, "could not initialize the i2c interface");
@@ -329,7 +455,6 @@ void app_main(){
     const uint8_t len =  sizeof(sensors)/sizeof(ads_sensor*);
 
     QueueHandle_t sensor_data_queue = xQueueCreate(min(len*3, QUEUE_SIZE), sizeof(ads_sensor**));
-
     
 
     if(STORE_MODE == SD_CARD_MODE || STORE_MODE == SD_CARD_AND_STREAM_MODE){
@@ -339,16 +464,43 @@ void app_main(){
     }
     
     read_sensors_task_params params[len];
+    TaskHandle_t read_tasks_handles[len];
+
     for(uint8_t i =0; i< len; i++){
         params[i].sensor_data_queue = sensor_data_queue;
         params[i].sensor = sensors[i];
-        xTaskCreatePinnedToCore(task_read_ads_sensors,   sensors[i]->name, configMINIMAL_STACK_SIZE * 10, (void *)&params[i], 5, NULL, APP_CPU_NUM);
+        xTaskCreatePinnedToCore(task_read_ads_sensors,   sensors[i]->name, configMINIMAL_STACK_SIZE * 10, (void *)&params[i], 5,(read_tasks_handles+i), APP_CPU_NUM);
+        vTaskSuspend(read_tasks_handles[i]);
     }
+
+    xTaskCreatePinnedToCore(task_store_data, "task_store_data", configMINIMAL_STACK_SIZE * 10,  (void *)sensor_data_queue, 6, NULL, PRO_CPU_NUM);
 
 
     
 
-    xTaskCreatePinnedToCore(task_store_data, "task_store_data", configMINIMAL_STACK_SIZE * 10, (void *)sensor_data_queue, 6, NULL, PRO_CPU_NUM);
+    uint8_t btn_n = sizeof(BTNs)/sizeof(gpio_num_t);
+    
+    QueueHandle_t btn_queue = xQueueCreate(5, sizeof(gpio_num_t));
+    
+
+    Button buttons[btn_n];
+    uint8_t i;
+    // Install ISR service and attach the ISR handler to the button GPIO
+    gpio_install_isr_service(ESP_INTR_FLAG_EDGE);
+    for(i =0;i < btn_n ;i++){
+        buttons[i].pin = BTNs[i];
+        buttons[i].queue = btn_queue;
+        configure_button(buttons+i);
+    }
+
+    task_btn_params info = {
+        .handles = read_tasks_handles,
+        .handles_len = len,
+        .queue = btn_queue,
+        
+    };
+
+    xTaskCreatePinnedToCore(task_btns, "task_btns", configMINIMAL_STACK_SIZE * 10,  (void *)&info, 10, NULL, PRO_CPU_NUM);
 
     while (1){
         vTaskDelay(portMAX_DELAY);

@@ -56,7 +56,14 @@
         "errno.h": "c",
         "string.h": "c",
         "esp_wifi.h": "c",
-        "ds3231.h": "c"
+        "ds3231.h": "c",
+        "gpio.h": "c",
+        "condition_variable": "c",
+        "mutex": "c",
+        "sstream": "c",
+        "stop_token": "c",
+        "time.h": "c",
+        "types.h": "c"
     },
     "idf.portWin": "COM3"
 }

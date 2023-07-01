@@ -2,9 +2,12 @@
 #define __ADS_SENSOR_H__
 
 #include "ads111x.h"
+#include <sys/time.h>
 #include <string.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <stdio.h>
+
 
 //-----I2C ---------------------------------------
 #define I2C_PORT 0
@@ -19,7 +22,7 @@ typedef struct{
     uint8_t id;
     int16_t value; //last measured value
     uint64_t timestamp;//last measured value timestamp
-    uint64_t time_between_reads;//last measured value timestamp
+    uint32_t time_between_reads;//last measured value timestamp
     i2c_dev_t *ads;
     ads111x_mux_t mux;
     ads111x_gain_t gain;
@@ -57,8 +60,6 @@ typedef enum{
 typedef enum{
     RANGE_N0V778_2V851 = 0
 } inverse_voltage_range;
-
-
 
 
 
@@ -111,6 +112,6 @@ sensor_data extract_data(ads_sensor* sensor);
 esp_err_t fake_ads_sensor_read(ads_sensor* sensor);
 i2c_dev_t* fake_ads_create(uint8_t address, ads111x_data_rate_t data_rate, ads111x_mode_t mode);
 
-
+uint64_t get_timestamp();
 
 #endif
