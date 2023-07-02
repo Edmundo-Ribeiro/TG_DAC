@@ -24,6 +24,10 @@ esp_err_t write_on_file(const char *path, char *data) {
     FILE *f = fopen(mounted_path, "a");  // Open file in append mode
     if (f == NULL) {
         ESP_LOGE(TAG_SD, "Failed to open file %s for writing",mounted_path);
+        printf("errno: %d\n", errno);
+        if(errno = EIO){
+            return ESP_ERR_INVALID_STATE;
+        }
         return ESP_FAIL;
     }
     fprintf(f, "%s", data);  // Append the data to the end of the file
@@ -83,7 +87,10 @@ esp_err_t sd_card_init(sdmmc_card_t **card) {
    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     err = spi_bus_init(host.slot);
 
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG_SD, "SD card could not be initialized");
+        return err;
+    }
 
     err = sd_card_mount(&host, card);
 
@@ -111,4 +118,5 @@ esp_err_t sd_card_unmount( sdmmc_card_t **card) {
 
     return err;
 }
+
 
