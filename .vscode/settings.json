@@ -63,7 +63,10 @@
         "sstream": "c",
         "stop_token": "c",
         "time.h": "c",
-        "types.h": "c"
+        "types.h": "c",
+        "cerrno": "c",
+        "freertosconfig.h": "c",
+        "sd_card.h": "c"
     },
     "idf.portWin": "COM3"
 }

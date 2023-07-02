@@ -14,7 +14,10 @@ X sincronizar relogio do esp com rtc
         sincronizar relogios
 
     
-botoes/leds para iniciar/parar/apagar arquivos/ conectar/desconctar da internet
+botoes/leds para 
+    X iniciar/parar/
+    apagar arquivos/ 
+    conectar/desconctar da internet
 
 X enviar arquivos pelo socket diretamente
 

@@ -16,6 +16,7 @@
 
 #include "sdmmc_cmd.h"
 
+#include <errno.h>
 
 #define TAG_SD "SD_CARD"
 

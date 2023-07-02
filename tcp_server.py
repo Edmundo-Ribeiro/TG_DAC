@@ -19,35 +19,47 @@ def tcp_server():
     # Listen for incoming connections
     server_socket.listen(1)
     print("TCP server is listening for connections...")
+    try:
+        while True:
+            # Accept a client connection
+            try:
+                client_socket, address = server_socket.accept()
+                print(f"Connection established from: {address}")
+            except KeyboardInterrupt:
+                print ("i want to close client socket")
+                client_socket.close()
+                quit()
+            # # Receive data from the client
+            # data = client_socket.recv(1024)
+            # filename, filesize = data.decode().split(',')
+            # print(filename, filesize)
 
-    while True:
-        # Accept a client connection
-        client_socket, address = server_socket.accept()
-        print(f"Connection established from: {address}")
+            # client_socket.send("ok".encode())
 
-        # # Receive data from the client
-        # data = client_socket.recv(1024)
-        # filename, filesize = data.decode().split(',')
-        # print(filename, filesize)
+            data = 'ok'
+            while(data):
+                # Save the received data to a file
+                data = client_socket.recv(1024).decode()
+            
+                
+                print(data)
+                streams = data.split("\n")
+                print(streams)
+                for stream in streams:
+                    if(not len(stream)):
+                        continue
 
-        # client_socket.send("ok".encode())
-
-        data = 'ok'
-        while(data):
-            # Save the received data to a file
-            data = client_socket.recv(1024).decode()
-            print(data)
-            streams = data.split("\n")
-            print(streams)
-            for stream in streams:
-                if(not len(stream)):
-                    continue
-
-                filename, content = stream.split(":")
-                save_data_to_file(content+"\n", filename)
-
-        # Close the client socket
+                    filename, content = stream.split(":")
+                    save_data_to_file(content+"\n", filename)
+         
+    except KeyboardInterrupt:
+        print ("i want to close client socket")
         client_socket.close()
+        quit()
+    except (socket.error, e):
+        print( "a socket erro has occurred, e = ", e)
+        quit()
+            
 
     # Close the server socket
     server_socket.close()
