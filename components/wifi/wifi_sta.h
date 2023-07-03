@@ -38,6 +38,7 @@
 
 #define TAG_WIFI "WiFI STA"
 #define TAG_SOCK "SOCKET"
+#define TAG_RTC "RTC"
 
 static EventGroupHandle_t wifi_events;
 
@@ -71,4 +72,8 @@ esp_err_t set_rtc_with_esp_time(i2c_dev_t* ds_clock);
 
     
 esp_err_t set_esp_time_with_rtc(i2c_dev_t* ds_clock);
+
+void wifi_connection_task(void *pvParameters);
+
+void config_clock_system();
 #endif

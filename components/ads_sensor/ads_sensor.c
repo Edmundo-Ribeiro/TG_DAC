@@ -181,11 +181,21 @@ void wait_while_busy(i2c_dev_t* ads){
     ESP_LOGD(TAG_TC,"Busy count: %d\n", busy_count);
 }
 
+int getRandomInteger(int minValue, int maxValue) {
+    // Get a random number within the desired range
+    int result = minValue + (esp_random() % (maxValue - minValue + 1));
+    
+    return result;
+}
 
 esp_err_t fake_ads_sensor_read(ads_sensor* sensor){
-    sensor->value = rand()%32768;
-    sensor->timestamp = esp_timer_get_time();
-    
+    sensor->value = getRandomInteger(-32768,32768);
+    sensor->timestamp =get_timestamp();
+    TickType_t simulated_delay = pdMS_TO_TICKS(getRandomInteger(10,200));//simulate i2c delay
+    TickType_t lastTick = xTaskGetTickCount();
+    while(lastTick - xTaskGetTickCount() < simulated_delay){
+        //do nothing...
+    }
     // ESP_LOGI(TAG_TC,"FAKE read ADC[%u].%u raw value: {%d} - {%x}",sensor->ads->addr,sensor->mux, sensor->value, sensor->value);
     return ESP_OK;
 }

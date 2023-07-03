@@ -124,6 +124,7 @@ static void event_handler(void *event_handler_arg, esp_event_base_t event_base, 
 
             if (wifi_event_sta_disconnected->reason != WIFI_REASON_ASSOC_LEAVE){
                  if (s_retry_num < MAXIMUM_RETRY) {
+                    vTaskDelay(pdMS_TO_TICKS(5000));
                     esp_wifi_connect();
                     s_retry_num++;
                     ESP_LOGW(TAG_WIFI, "retry {%u} of {%u} to connect to the AP",s_retry_num,MAXIMUM_RETRY);
@@ -132,6 +133,7 @@ static void event_handler(void *event_handler_arg, esp_event_base_t event_base, 
             }
 
             xEventGroupSetBits(wifi_events, DISCONNECTED);
+            s_retry_num = 0;
         }
             break;
 
@@ -200,7 +202,7 @@ esp_err_t wifi_sta_init(){
 }
 
 
-esp_err_t wifi_sta_connect(){
+esp_err_t wifi_sta_start_driver(){
 
     // wifi_events = xEventGroupCreate();
     wifi_config_t wifi_config;
@@ -222,20 +224,68 @@ esp_err_t wifi_sta_connect(){
     // ip_info.netmask.addr = ipaddr_addr("255.255.255.0");
     // esp_netif_set_ip_info(esp_netif, &ip_info);
     //}
-   
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    esp_err_t err;
+    err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if(err != ESP_OK) return err;
+    err = esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config);
+    if(err != ESP_OK) return err;
+    err = esp_wifi_start();
+    if(err != ESP_OK) 
 
     ESP_LOGI(TAG_WIFI, "The wifi driver has started in STA mode!");
+    return err;
+}
 
-    EventBits_t result = xEventGroupWaitBits(wifi_events, CONNECTED_GOT_IP | DISCONNECTED, pdTRUE, pdFALSE, pdMS_TO_TICKS(5000));
-   
-    if (result == CONNECTED_GOT_IP){
-        ESP_LOGI(TAG_WIFI, "Connected to ap SSID:%s\n",WIFI_SSID);
-        return ESP_OK;
+
+void wifi_connection_task(void *pvParameters) {
+
+    config_clock_system(); // setup the timezone, sync mode and what happens when the clock is synced
+    wifi_sta_start_driver();// config the ssid and password, setup as STA mode, start the modules 
+
+    EventBits_t result;
+    TickType_t wait_time = portMAX_DELAY;
+    sntp_sync_status_t sync_status;
+
+    while (1) {
+
+        result = xEventGroupWaitBits(wifi_events, CONNECTED_GOT_IP | DISCONNECTED, pdTRUE, pdFALSE, wait_time);
+        switch (result){
+
+        case DISCONNECTED:
+            ESP_LOGI(TAG_WIFI, "connect again");
+            esp_wifi_connect();
+            wait_time = portMAX_DELAY;
+            break;
+        
+        
+        case CONNECTED_GOT_IP:
+            wifi_ap_record_t ap_info;
+            esp_err_t err = esp_wifi_sta_get_ap_info(&ap_info);
+            if (!esp_sntp_enabled()) {
+                // sntp_set_sync_interval(1200000);
+                esp_sntp_init();
+            }
+
+            if (err == ESP_OK) {
+                if (ap_info.rssi > -60) {
+                    ESP_LOGI(TAG_WIFI,"Connected to Wi-Fi: rssi=%d\n",ap_info.rssi );
+                } else {
+                    ESP_LOGI(TAG_WIFI,"Wi-Fi signal strength is weak: rssi=%d\n",ap_info.rssi );
+                }
+            }
+
+            wait_time = pdMS_TO_TICKS(5000);
+            break;
+
+            default:
+            ESP_LOGW(TAG_WIFI, "testing");
+            //verificar se deve parar e desconectar do wifi para iniciar leituras, suspender essa task
+            break;
+        }
+       
+
+        // vTaskDelay(pdMS_TO_TICKS(5000));  // Check every 5 seconds
     }
-    return ESP_FAIL;
 }
 
 void _wifi_sta_disconnect(){
@@ -244,6 +294,31 @@ void _wifi_sta_disconnect(){
     ESP_ERROR_CHECK(esp_wifi_stop());
     ESP_LOGI(TAG_WIFI, "***********DISCONNECTING COMPLETE*********");
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 esp_err_t socket_connect(int sock){
     char server_ip[] = SERVER_IP;
@@ -375,9 +450,13 @@ void time_sync_notification_cb(struct timeval *tv){
     i2c_dev_t _ds_clock;
     i2c_dev_t *ds_clock = &_ds_clock;
     memset(ds_clock, 0, sizeof(i2c_dev_t));
-    ESP_ERROR_CHECK(ds3231_init_desc(ds_clock, 0, 21, 22));
+    if(ds3231_init_desc(ds_clock, 0, 21, 22) != ESP_OK){
+        ESP_LOGW(TAG_RTC, "Failed to init ds_clock descriptor");
+    }
 
-    ESP_ERROR_CHECK(set_rtc_with_esp_time(ds_clock));
+    if(set_rtc_with_esp_time(ds_clock) != ESP_OK){
+        ESP_LOGW(TAG_RTC, "RTC was not synced");
+    }
 }
 
 void config_clock_system(){
@@ -387,6 +466,9 @@ void config_clock_system(){
     sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
 
     sntp_set_time_sync_notification_cb(time_sync_notification_cb);
+
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
 
 }
 
@@ -417,6 +499,7 @@ esp_err_t set_esp_time_with_rtc(i2c_dev_t* ds_clock){
     return err;
 }
 
+
 void task_start_sntp_system(void *pvParameters) {
 
     config_clock_system();
@@ -430,8 +513,7 @@ void task_start_sntp_system(void *pvParameters) {
         if(result == CONNECTED_GOT_IP){
             if (!esp_sntp_enabled()) {
 
-            esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-            esp_sntp_setservername(0, "pool.ntp.org");
+            
             // sntp_set_sync_interval(1200000);
             esp_sntp_init();
             // vTaskDelete(NULL);

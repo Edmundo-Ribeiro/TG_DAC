@@ -66,7 +66,10 @@
         "types.h": "c",
         "cerrno": "c",
         "freertosconfig.h": "c",
-        "sd_card.h": "c"
+        "sd_card.h": "c",
+        "esp_netif.h": "c",
+        "esp_log.h": "c",
+        "esp_random.h": "c"
     },
     "idf.portWin": "COM3"
 }

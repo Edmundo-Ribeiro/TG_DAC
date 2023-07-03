@@ -35,7 +35,7 @@ typedef enum{
 } sensor_reading_mode;
 
 //----------------------------------------------------------------
-uint8_t STORAGE_MODE = SD_CARD_MODE;
+uint8_t STORAGE_MODE = FAKE_SD_CARD_MODE;
 uint8_t DATA_MODE = FAKE_READ_SENSORS;
 //----------------------------------------------------------------
 
@@ -75,14 +75,6 @@ static void task_alarm_led(void* params){
 
     uint8_t blinks;
     while(1){
-        blinks = 0;
-        while(blinks--){
-
-            gpio_set_level(LED_PIN, 1);
-            vTaskDelay(pdMS_TO_TICKS(200));
-            gpio_set_level(LED_PIN, 0);
-            vTaskDelay(pdMS_TO_TICKS(200));
-        }
 
         gpio_set_level(LED_PIN, 1);
         vTaskDelay(pdMS_TO_TICKS(1500));
@@ -315,6 +307,10 @@ typedef struct {
                     }
 
                 break;
+
+                case FAKE_SD_CARD_MODE:
+                    ESP_LOGI(TAG_SD,"fake storing on %s...",received_sensor->full_current_file_path);
+                break;
             
             default:
                 break;
@@ -518,9 +514,37 @@ void app_main(){
 
     if(i2cdev_init() != ESP_OK){
         ESP_LOGE(TAG_TC, "could not initialize the i2c interface");
-        start_alarm();
+        // start_alarm();
         return;
     }
+
+
+    //-------------------------------------------------------------------------------------------------------------
+    //rtc part
+    i2c_dev_t _ds_clock;
+    i2c_dev_t *ds_clock = &_ds_clock;
+    memset(ds_clock, 0, sizeof(i2c_dev_t));
+    // if(ds3231_init_desc(ds_clock, I2C_PORT, SDA_IO_NUM, SCL_IO_NUM) == ESP_OK){
+    //     set_esp_time_with_rtc(ds_clock);
+    // } else{
+    //     ESP_LOGE(TAG_RTC, "Could not initialize the rtc, esp timer not set");
+    // }
+
+    //----------------------------------------------------------------------------------------------------------
+    //Wifi part
+
+    
+    ESP_ERROR_CHECK(wifi_sta_init());
+    
+
+    xTaskCreatePinnedToCore(wifi_connection_task,  "wifi", configMINIMAL_STACK_SIZE * 10, (void *)NULL, 10,NULL, APP_CPU_NUM);
+
+
+
+
+
+    //-------------------------------------------------------------------------------------------------------------------
+    //sensor creation
     
     i2c_dev_t* ads1;
     i2c_dev_t* ads2;
@@ -536,7 +560,6 @@ void app_main(){
     //----------------------------------------------------------------------------------------------------------
    
    
-    //sensor creation
     
 
     ads_sensor* lm35 = ads_sensor_create("lm35_1",LM35_1, ads1, ADS111X_GAIN_1V024, ADS111X_MUX_0_GND, MIN_READ_TIME);
@@ -561,13 +584,14 @@ void app_main(){
     QueueHandle_t eio_flag_queue = xQueueCreate(2, sizeof(bool));
 
     sdmmc_card_t *card;
+    task_sd_params sd_params = {
+        .mode = STORAGE_MODE,
+        .queue = eio_flag_queue,
+        .p_sensors = sensors,
+        .sensors_len = len
+    };
+
     if(STORAGE_MODE == SD_CARD_MODE || STORAGE_MODE == SD_CARD_AND_STREAM_MODE){
-        task_sd_params sd_params = {
-            .mode = STORAGE_MODE,
-            .queue = eio_flag_queue,
-            .p_sensors = sensors,
-            .sensors_len = len
-        };
         uint8_t i;
         sd_card_init(&card);
         for(i=0; i <len; i++){
@@ -620,7 +644,7 @@ void app_main(){
         
     };
 
-    xTaskCreatePinnedToCore(task_btns, "task_btns", configMINIMAL_STACK_SIZE * 10,  (void *)&info, 10, NULL, PRO_CPU_NUM);
+    xTaskCreatePinnedToCore(task_btns, "task_btns", configMINIMAL_STACK_SIZE * 10,  (void *)&info, 15, NULL, PRO_CPU_NUM);
 
     while (1){
         vTaskDelay(portMAX_DELAY);
