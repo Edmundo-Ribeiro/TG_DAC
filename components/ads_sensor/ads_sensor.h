@@ -115,4 +115,6 @@ i2c_dev_t* fake_ads_create(uint8_t address, ads111x_data_rate_t data_rate, ads11
 
 uint64_t get_timestamp();
 
+int getRandomInteger(int minValue, int maxValue);
+
 #endif

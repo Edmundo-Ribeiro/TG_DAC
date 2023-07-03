@@ -6,7 +6,7 @@
 #include "esp_log.h"
 #include <time.h>
 #include "driver/gpio.h"
-
+#include "esp_random.h"
 
 #include "ads_sensor.h"
 #include "sd_card.h"
@@ -38,7 +38,6 @@ typedef enum{
 uint8_t STORAGE_MODE = FAKE_SD_CARD_MODE;
 uint8_t DATA_MODE = FAKE_READ_SENSORS;
 //----------------------------------------------------------------
-
 
 
 static int min(int a, int b) { return (a < b ? a : b); }
@@ -192,10 +191,12 @@ char* start_file_directory(const char* sensor_name, char * full_file_path){
     // char full_file_path[MAX_CHAR_SIZE];
     
     strftime(dir_name, sizeof(dir_name), "%y_%m_%d", &time_info);
-    strftime(file_name, sizeof(file_name), "%H_%M", &time_info);
+    strftime(file_name, sizeof(file_name), "%H_%M_%S", &time_info);
 
     snprintf(full_file_path,strlen(dir_name)+strlen(sensor_name)+strlen(file_name)+7 , "%s/%s/%s.txt",  dir_name, sensor_name,file_name);
-    create_file_path(full_file_path);
+    if(STORAGE_MODE == SD_CARD_MODE || STORAGE_MODE == SD_CARD_AND_STREAM_MODE){
+        create_file_path(full_file_path);
+    }
     return full_file_path;
 }
 
@@ -270,7 +271,7 @@ typedef struct {
 }task_store_data_params;
 
 
-    static void task_store_data(void *pvParams){
+static void task_store_data(void *pvParams){
 
     QueueHandle_t sensor_data_queue = ((task_store_data_params* ) pvParams)->data_queue;
     QueueHandle_t eio_queue = ((task_store_data_params* ) pvParams)->eio_queue;
@@ -310,6 +311,11 @@ typedef struct {
 
                 case FAKE_SD_CARD_MODE:
                     ESP_LOGI(TAG_SD,"fake storing on %s...",received_sensor->full_current_file_path);
+                    TickType_t simulated_delay = pdMS_TO_TICKS(getRandomInteger(5,30));//simulate i2c delay
+                    TickType_t lastTick = xTaskGetTickCount();
+                    while(lastTick - xTaskGetTickCount() < simulated_delay){//simulate delay for writing 
+                        //do nothing...
+                    }
                 break;
             
             default:
@@ -400,9 +406,11 @@ typedef struct {
 typedef struct {
 
     uint8_t handles_len;
+    uint8_t sensors_len;
     TaskHandle_t *handles;
-    
     QueueHandle_t queue;
+    ads_sensor** sensors;
+
 
 }task_btn_params;
 
@@ -467,9 +475,12 @@ void configure_button(Button* button) {
 
 
 
+
 static void task_btns(void* _args){
 
     task_btn_params* args = (task_btn_params*)_args;
+    ads_sensor**sensors = (ads_sensor**)args->sensors;
+    uint8_t i;
     gpio_num_t button_pin;
 
 
@@ -480,7 +491,11 @@ static void task_btns(void* _args){
             switch (button_pin){
 
                 case START_MESURES_BT:
-                    ESP_LOGI(TAG_MAIN,"\n\n\tRESUMING READINGS...\n\n");
+                    ESP_LOGI(TAG_MAIN,"\n\n\tSTART READINGS...\n\n");
+                    for(i=0; i <args->sensors_len; i++){
+                         printf("sensors[%d] = %s\n", i, sensors[i]->name);
+                        start_file_directory(sensors[i]->name, sensors[i]->full_current_file_path);
+                    }
                     resume_tasks(args->handles, args->handles_len);
                     gpio_set_level(LED_PIN, 1);
                     break;
@@ -641,6 +656,8 @@ void app_main(){
         .handles = read_tasks_handles,
         .handles_len = len,
         .queue = btn_queue,
+        .sensors = sensors,
+        .sensors_len = len, // equals handles len, but keeping it separate just in case it changes one day
         
     };
 
