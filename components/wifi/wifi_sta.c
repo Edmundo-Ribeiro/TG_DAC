@@ -444,8 +444,8 @@ esp_err_t stream_data(int sock, char* data, uint8_t retries ){
 
 
 void time_sync_notification_cb(struct timeval *tv){
-    ESP_LOGI("Time","\n\n\n\t!TIME SYNC OCCURRED!\n\n\n");
     
+    logi_now("\n\n\n\t!TIME SYNC OCCURRED!");
 
     i2c_dev_t _ds_clock;
     i2c_dev_t *ds_clock = &_ds_clock;
@@ -456,7 +456,10 @@ void time_sync_notification_cb(struct timeval *tv){
 
     if(set_rtc_with_esp_time(ds_clock) != ESP_OK){
         ESP_LOGW(TAG_RTC, "RTC was not synced");
+    }else{
+        logi_now("\n\n\n\t!RTC SYNC OCCURRED!");
     }
+
 }
 
 void config_clock_system(){
@@ -525,6 +528,16 @@ void task_start_sntp_system(void *pvParameters) {
 
 void logi_time(struct tm* time_p, char* msg){
     char timeStr[64];
-    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", time_p);
-    ESP_LOGI("time:","%s: %s", msg,timeStr);
+    strftime(timeStr, sizeof(timeStr), "%d/%m/%Y %H:%M:%S", time_p);
+    ESP_LOGI(TAG_RTC,"%s: %s\n", msg,timeStr);
+}
+void logi_now(char* msg){
+    
+    time_t now_time;
+    struct tm now_time_info;
+
+    time(&now_time);
+    localtime_r(&now_time, &now_time_info);
+
+    logi_time(&now_time_info, msg);
 }

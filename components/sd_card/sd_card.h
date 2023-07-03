@@ -19,6 +19,8 @@
 #include <errno.h>
 
 #define TAG_SD "SD_CARD"
+#define TAG_DIR_C "DIR"
+
 
 #define MOUNT_POINT "/sdcard"
 #define MAX_CHAR_SIZE 128
@@ -46,4 +48,9 @@ esp_err_t sd_card_format(sdmmc_card_t **card);
 
 esp_err_t sd_card_unmount( sdmmc_card_t **card);
 
+
+
+char* setup_file_directory(const char* sensor_name, char * full_file_path);
+
+esp_err_t start_file_directory(const char* sensor_name, char * full_file_path);
 #endif

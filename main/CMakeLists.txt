@@ -7,4 +7,5 @@ idf_component_register(SRCS "main.c"
                        "../components/sd_card" 
                        "../components/esp_idf_lib_helpers"
                        "../components/ds3231"
+                       "../components/my_buttons"
                        )

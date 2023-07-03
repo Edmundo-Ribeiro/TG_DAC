@@ -67,6 +67,8 @@ void task_start_sntp_system(void *pvParameters);
 
 void logi_time(struct tm* time_p, char* msg);
 
+void logi_now(char* msg);
+
 
 esp_err_t set_rtc_with_esp_time(i2c_dev_t* ds_clock);
 

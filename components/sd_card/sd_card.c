@@ -120,3 +120,114 @@ esp_err_t sd_card_unmount( sdmmc_card_t **card) {
 }
 
 
+
+esp_err_t create_dir(const char * dir){//alway in relation to mount point
+    
+    char mounted_dir[MAX_CHAR_SIZE];
+    char *mount_point = MOUNT_POINT;
+
+    snprintf(mounted_dir,sizeof(mounted_dir),"%s/%s",mount_point,dir);
+    if(mkdir(mounted_dir,777) == -1){
+        if(errno == EEXIST){
+            ESP_LOGW(TAG_DIR_C, "dir %s already exist",mounted_dir );
+        }
+        else{
+            ESP_LOGE(TAG_DIR_C, "directory %s error",mounted_dir);
+            return ESP_FAIL;
+        }
+    }
+    return ESP_OK;
+
+}
+
+
+bool slash_dir(char* dir, char* before, char *after){
+    char *c;
+    int count;
+    int before_len = strlen(before)+1;
+    char aux[before_len];
+
+    for(c= dir, count = 0; (*c )!= '\0'; c++, count++){
+        // printf("%c - %d\n",*c, count);
+        if(*c == '/'){
+            snprintf(after, strlen(dir) - count, "%s",c+1);
+
+            if(before[0]!='\0'){
+                strcpy(aux,before);
+                snprintf(before, count+before_len+1, "%s/%s",aux,dir);
+            }
+            else{
+                snprintf(before, count+1, "%s",dir);
+            }
+
+        //     *(*(before))= '\0';
+            return true;
+        }
+    }
+    return false;
+}
+
+
+esp_err_t create_file_path(const char * file_path){
+        char* path = strdup(file_path);  // Make a copy of the filepath
+
+
+        // printf("Start: trying to create %s\n", path);
+        esp_err_t err;
+        uint8_t len = strlen(path);
+
+        char before[len+1];
+        char after[len+1];
+
+        memset(before,0,len);
+        memset(after,0,len);
+
+        while(slash_dir(path,before,after)){
+       
+
+        err = create_dir(before);
+
+            if(err != ESP_OK){
+                return err;
+            }
+        
+        strcpy(path,after);
+        }
+
+        
+        free(path); 
+        return ESP_OK;
+    }
+
+
+
+esp_err_t start_file_directory(const char* sensor_name, char * full_file_path){
+    
+    return create_file_path(setup_file_directory(sensor_name, full_file_path));
+   
+}
+
+char* setup_file_directory(const char* sensor_name, char * full_file_path){
+      
+
+    if(strlen(sensor_name)>8){
+        ESP_LOGE(TAG_DIR_C,"sensor name %s too big [max 8]", sensor_name);
+        return '\0';
+    }
+
+    time_t now;
+    struct tm time_info;
+    time(&now);
+    localtime_r(&now, &time_info);
+
+    char dir_name[9];
+    char file_name[9];
+    // char full_file_path[MAX_CHAR_SIZE];
+    
+    strftime(dir_name, sizeof(dir_name), "%y_%m_%d", &time_info);
+    strftime(file_name, sizeof(file_name), "%H_%M_%S", &time_info);
+
+    snprintf(full_file_path,strlen(dir_name)+strlen(sensor_name)+strlen(file_name)+7 , "%s/%s/%s.txt",  dir_name, sensor_name,file_name);
+      
+    return full_file_path;
+}
