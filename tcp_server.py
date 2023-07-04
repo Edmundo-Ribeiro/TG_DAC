@@ -5,7 +5,8 @@ import os
 import re
 from pathlib import Path
 import sys
-from _thread import *
+# from _thread import *
+import threading
 import time
 
 
@@ -57,21 +58,29 @@ def save_data_to_file(data,file_path,filename):
     print(f"Data saved to file: {full_file_path}")
 
 
-def threaded_client(connection):
-    connection.setblocking(0)
-    max_idle_time = 0.5#min
+stop_flag = threading.Event()
+
+
+def threaded_client(sock, thread_count):
+
+    sock.setblocking(0)
+    max_idle_time = 30#s
     last_data_timestamp = time.time()
     aux_timestamp = 0
     preverr = ''
-    while True:
+
+    while not stop_flag.is_set():
+        
         try:
             # If there's data from a client, handle it as before
-            data = connection.recv(2048).decode()
+            data = sock.recv(2048).decode()
+            if(not data):
+                raise  ValueError("no data")
             
             last_data_timestamp = time.time()
-            print(data)
+            print("data = "+data)
             streams = data.split("\n")
-            print(streams)
+            print("stream = "+streams)
             for stream in streams:
                 if not len(stream): #string vazia ''
                     continue
@@ -80,125 +89,123 @@ def threaded_client(connection):
                 if err != "ESP_OK":
                     evaluate_format(preverr + err)
                     preverr = err
-        except socket.error:
+
+        except (socket.error, ValueError):
             seconds_since_last_data = int(time.time() - last_data_timestamp)
 
             if(seconds_since_last_data != aux_timestamp):
-                print(f"Remaining time for {connection.getsockname()} = {max_idle_time*60 - seconds_since_last_data}")
+                print(f"Remaining time for {sock.getsockname()} = {max_idle_time - seconds_since_last_data}")
                 aux_timestamp = seconds_since_last_data
 
-            if(seconds_since_last_data >= max_idle_time*60):
+            if(seconds_since_last_data >= max_idle_time):
                 print("Idle time expired!")
                 break # If there's no data from a client, move on to the next client
             pass
 
-    print(f"Closing socket {connection.getsockname()}")
-    connection.close()
+    print(f"Closing socket {sock.getsockname()}")
+    sock.close()
+    thread_count[0]-=1
 
 
-def tcp_server():
-    ServerSocket = socket.socket()
-    host = socket.gethostname()
-    port = 23
-    ThreadCount = 0
+def tcp_socket_server(config, client_sockets, threads):
+    server_socket = socket.socket()
+    t_count = [0]
     
     try:
-        ServerSocket.bind((host, port))
+        server_socket.bind(config)
     except socket.error as e:
         print(str(e))
+        return
+    
+    print('TCP server stared, Waiting for a Connection...')
+    server_socket.listen(5)
+    server_socket.setblocking(0)
 
-    print('Waiting for a Connection...')
-    ServerSocket.listen(5)
-    ServerSocket.setblocking(0)
-
-    client_sockets = []
-    while True:
+    while not stop_flag.is_set():
         try:
-            Client, address = ServerSocket.accept()
+            client_socket, address = server_socket.accept()
             print('Connected to: ' + address[0] + ':' + str(address[1]))
-            client_sockets.append(Client)
-            Client
-            start_new_thread(threaded_client, (Client, ))
-            ThreadCount += 1
-            print('Thread Number: ' + str(ThreadCount))
+            client_sockets.append(client_socket)
+            t = threading.Thread(target=threaded_client, args=(client_socket, t_count))
+            threads.append(t)
+            t.start()
+            # threads.append(start_new_thread(threaded_client, (client_socket, t_count)))
+            t_count[0] += 1
+            print('Thread Number: ' + str(t_count[0]))
         except:
-            if msvcrt.kbhit():
-                # Read the key
-                key = msvcrt.getch()
-                if key.decode().upper() == 'Q':
-                    # If 'Q' is pressed, quit the server gracefully
-                    print("Quitting the server...")
-                    for client_socket in client_sockets:
-                        client_socket.close()
-                    ServerSocket.close()
-                    sys.exit()
-                # elif key.decode().upper() == "E":
-                #     print("Closing sockets...")
-                #     for client_socket in client_sockets:
-                #         client_socket.close()
+           
             pass
+    
+    print("Closing TCP server socket...")
+    server_socket.close()
+
+def udp_socket_server(port):
+    # Create a UDP socket
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    # Enable broadcasting on the socket
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+
+    # Bind the socket to a specific IP address and port
+    server_address = ("", port)  # Use an empty string to bind to all available network interfaces
+    server_socket.bind(server_address)
+    server_socket.setblocking(0)
+    print("UDP server started and listening for broadcast messages.")
+
+    server_ip = socket.gethostbyname(socket.gethostname())
+
+    while not stop_flag.is_set():
+        # Receive the data and client address
+        try:
+            data, client_address = server_socket.recvfrom(1024)
+
+            # Decode the received data assuming it's a string
+            received_message = data.decode("utf-8")
+
+            print(f"Received broadcast message: {received_message} from {client_address}")
+
+            # Get the IP address of the server
+
+            # Send the server IP address back to the client
+            server_socket.sendto(server_ip.encode("utf-8"), client_address)
+        except:
+            pass
+    
+    print("Closing UDP server socket...")
+    server_socket.close()
 
 
 
-def tcppp_server():
-    # Specify the host and port for the server to listen on
+def server():
+    
     host = socket.gethostname()
     port = 23
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # Create a TCP socket and bind it to the specified host and port
-    print(f"Binding to {host}:{port}...")
-    server_socket.bind((host, port))
-
-
-    # Listen for incoming connections
-    server_socket.listen(1)
-    print("TCP server is listening for connections...")
-
-       # Create a list to store the client sockets
+    threads = []
     client_sockets = []
 
+    t_udp = threading.Thread(target=udp_socket_server, args=(port,))
+    t_tcp = threading.Thread(target=tcp_socket_server, args=((host,port), client_sockets, threads))
+
+    t_udp.start()
+    t_tcp.start()
+
+
     while True:
-        # Accept a client connection
-        client_socket, address = server_socket.accept()
-        print(f"Connection established from: {address}")
-        client_sockets.append(client_socket)
+        if msvcrt.kbhit():
+            # Read the key
+            key = msvcrt.getch()
+            if key.decode().upper() == 'Q':
+                # If 'Q' is pressed, quit the server gracefully
+                print("Quitting the server...")
 
-        # Set the server socket to non-blocking mode
-        server_socket.setblocking(0)
-
-        while True:
-            # Check if a key is pressed
-            if msvcrt.kbhit():
-                # Read the key
-                key = msvcrt.getch()
-                if key.decode().upper() == 'Q':
-                    # If 'Q' is pressed, quit the server gracefully
-                    print("Quitting the server...")
-                    for client_socket in client_sockets:
-                        client_socket.close()
-                    server_socket.close()
-                    sys.exit()
-
-            # Handle client data
-            for client_socket in client_sockets:
-                try:
-                    client_socket.setblocking(0)
-                    # If there's data from a client, handle it as before
-                    data = client_socket.recv(2048).decode()
-                    print(data)
-                    streams = data.split("\n")
-                    print(streams)
-                    for stream in streams:
-                        if not len(stream):
-                            continue
-                        err = evaluate_format(stream)
-                        if err != "ESP_OK":
-                            evaluate_format(preverr + err)
-                except socket.error:
-                    # If there's no data from a client, move on to the next client
-                    pass
+                stop_flag.set()
+                # time.sleep(3)
+                return
 
 
 
-# Start the TCP server
-tcp_server()
+
+if __name__ == "__main__":
+    server()
+    sys.exit()
+
