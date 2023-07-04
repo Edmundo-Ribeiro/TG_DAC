@@ -1,0 +1,63 @@
+menu "ESP DAC CONFIG"
+
+
+    config ESP_DAC_ID
+        int "Id of esp DAC"
+        range 0 1000
+
+        default 1
+        help
+        Define the id number used to identify this esp dac.
+
+    
+    choice STORAGE_OPERATION_MODE
+        prompt "Select the data storage mode"
+        default SD_CARD_MODE
+        help
+        How the data collected by the sensors will be stored.
+    config SD_CARD_MODE
+        bool "SD card only"
+    config FAKE_SD_CARD_MODE
+        bool "Fake SD card (simmulated)"
+    config STREAM_MODE
+        bool "Stream data only"
+    config SD_CARD_AND_STREAM_MODE
+        bool "SD card and Stream data"
+    endchoice
+    
+   
+    choice DATA_COLLECTION
+        prompt "How the data will be collected"
+        default FAKE_READ_SENSORS
+        help
+        How the data collected by the sensors will be stored.
+
+    config READ_SENSORS
+        bool "Read real sensors"
+    config FAKE_READ_SENSORS
+        bool "Read fake sensors (simmulated)"
+    endchoice
+
+    config WIFI_SSID
+        string "WiFi SSID"
+        default "esp_wifi"
+        help
+            SSID (network name) to connect to.
+
+    config WIFI_PASSWORD
+        string "WiFi Password"
+        default "esp_wifi"
+        help
+            WiFi password (WPA or WPA2).
+            Can be left blank if the network has no security set.
+
+    config WIFI_CONN_MAX_RETRY
+        int "Maximum retry"
+        default 6
+        help
+            Set the Maximum retry to avoid station reconnecting to the AP unlimited,
+            in case the AP is really inexistent.
+
+
+
+endmenu

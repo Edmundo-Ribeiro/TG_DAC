@@ -27,12 +27,12 @@
 
 
 
-#define WIFI_SSID      CONFIG_EXAMPLE_WIFI_SSID
-#define WIFI_PASS      CONFIG_EXAMPLE_WIFI_PASSWORD
-#define MAXIMUM_RETRY  CONFIG_EXAMPLE_WIFI_CONN_MAX_RETRY
+#define WIFI_SSID      CONFIG_WIFI_SSID
+#define WIFI_PASS      CONFIG_WIFI_PASSWORD
+#define MAXIMUM_RETRY  CONFIG_WIFI_CONN_MAX_RETRY
 
 
-#define SERVER_IP  "192.168.1.130"
+#define SERVER_IP  "192.168.1.130"//"10.0.0.101"
 #define SERVER_PORT  23
 #define BUFFER_SIZE  1024
 
@@ -78,4 +78,6 @@ esp_err_t set_esp_time_with_rtc(i2c_dev_t* ds_clock);
 void wifi_connection_task(void *pvParameters);
 
 void config_clock_system();
+
+void config_timezone();
 #endif

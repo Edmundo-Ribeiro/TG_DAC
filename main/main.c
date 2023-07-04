@@ -36,8 +36,21 @@ typedef enum{
 } sensor_reading_mode;
 
 //----------------------------------------------------------------
-uint8_t STORAGE_MODE = FAKE_SD_CARD_MODE;
-uint8_t DATA_MODE = FAKE_READ_SENSORS;
+#ifdef CONFIG_STREAM_MODE
+    uint8_t STORAGE_MODE = STREAM_MODE;
+#elif CONFIG_SD_CARD_MODE
+    uint8_t STORAGE_MODE = SD_CARD_MODE;
+#elif CONFIG_FAKE_SD_CARD_MODE
+    uint8_t STORAGE_MODE = FAKE_SD_CARD_MODE;
+#elif CONFIG_SD_CARD_AND_STREAM_MODE
+    uint8_t STORAGE_MODE = SD_CARD_AND_STREAM_MODE;
+#endif
+
+#ifdef CONFIG_FAKE_READ_SENSORS
+    uint8_t DATA_MODE = FAKE_READ_SENSORS;
+#elif CONFIG_READ_SENSORS
+    uint8_t DATA_MODE = READ_SENSORS;
+#endif 
 //----------------------------------------------------------------
 
 
@@ -162,6 +175,8 @@ static void task_read_ads_sensors(void* pvParams ){
 typedef struct {
     QueueHandle_t eio_queue;  
     QueueHandle_t data_queue;
+    QueueHandle_t buttons_queue;
+    int socket;
 }task_store_data_params;
 
 
@@ -169,10 +184,16 @@ static void task_store_data(void *pvParams){
 
     QueueHandle_t sensor_data_queue = ((task_store_data_params* ) pvParams)->data_queue;
     QueueHandle_t eio_queue = ((task_store_data_params* ) pvParams)->eio_queue;
+    QueueHandle_t buttons_queue = ((task_store_data_params* ) pvParams)->buttons_queue;
+    int *sockfd = ((task_store_data_params* ) pvParams)->socket;
 
     ads_sensor *received_sensor;
     char str_data[MAX_CHAR_SIZE];
     esp_err_t err;
+
+    gpio_num_t stop_button = STOP_MESURES_BT;
+    uint8_t fails_count = 0;
+
 
     while (1){
 
@@ -211,6 +232,24 @@ static void task_store_data(void *pvParams){
                         //do nothing...
                     }
                 break;
+
+                case STREAM_MODE:
+                    char data_to_stream[BUFFER_SIZE];
+                    snprintf(data_to_stream,sizeof(data_to_stream),"%s:%s",received_sensor->full_current_file_path,str_data);
+                    
+                    
+                    if(stream_data(*sockfd, data_to_stream, 2 ) == ESP_FAIL){
+                        if(fails_count > 20){
+                            ESP_LOGW(TAG_SOCK, "To many socket sends failed. Stopping stream...");
+                            xQueueSend(buttons_queue, &stop_button, 0);
+                            fails_count = 0;
+                        }else{
+                            fails_count +=1;
+                        }
+                    }
+
+
+                break;
             
             default:
                 break;
@@ -218,6 +257,7 @@ static void task_store_data(void *pvParams){
             
 
         }
+
     }
 }
 
@@ -243,33 +283,25 @@ void task_init_and_check_sd_storage(void* pvParams){
     bool flag_mounted_before = false;
 
     while(1){
-        // err = sd_card_init(&card);
+        err = sd_card_init(&card);
 
-        // if(err == ESP_OK){
-        //     ESP_LOGI(TAG_SD, "SD card initialized!");
-        //     STORAGE_MODE = running_mone; //todo :create a function for properly changing the operation mode
-        //     sdmmc_card_print_info(stdout, card);
-        //     flag_mounted_before = true;
-        //     //initialize the directories
-        //     for(i=0; i <len; i++){
-        //         printf("sensors[%d] = %s\n", i, sensors[i]->name);
-        //         start_file_directory(sensors[i]->name, sensors[i]->full_current_file_path);
-        //     }
+        if(err == ESP_OK){
+            ESP_LOGI(TAG_SD, "SD card initialized!");
+            STORAGE_MODE = running_mone; //todo :create a function for properly changing the operation mode
+            sdmmc_card_print_info(stdout, card);
+            flag_mounted_before = true;
+            
 
 
-        //     if(xQueueReceive(flag_queue, &flag_eio, portMAX_DELAY)== pdPASS){//wait until it needs to reinitialize the sd card
-        //         ESP_LOGW(TAG_SD, "\n\n\nTrying to reinitialize the sd card\n\n\n");
-        //     }  
-        // }
-        // else{
-        //     ESP_LOGW(TAG_SD, "\n\n\nThe STORAGE_MORE mode will be set to FAKE_SD_CARD until a sd car is detected\n\n\n");
-        //     if(flag_mounted_before){
-        //         sd_card_unmount(&card);
-        //     }
-        //     STORAGE_MODE = FAKE_SD_CARD_MODE;
-        // }
+            if(xQueueReceive(flag_queue, &flag_eio, portMAX_DELAY)== pdPASS){//wait until it needs to reinitialize the sd card
+                ESP_LOGW(TAG_SD, "\n\n\nTrying to reinitialize the sd card\n\n\n");
+            }  
+        }
+        else{
+            ESP_LOGW(TAG_SD, "\n\n\nThe STORAGE_MORE mode will be set to FAKE_SD_CARD until a sd car is detected\n\n\n");
+            STORAGE_MODE = FAKE_SD_CARD_MODE;
+        }
         
-        printf("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n");
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
         
@@ -367,6 +399,7 @@ void app_main(){
 
     //-------------------------------------------------------------------------------------------------------------
     //rtc part
+    config_timezone(); // setup the timezone, sync mode and what happens when the clock is synced with sntp
     i2c_dev_t _ds_clock;
     i2c_dev_t *ds_clock = &_ds_clock;
     memset(ds_clock, 0, sizeof(i2c_dev_t));
@@ -375,6 +408,7 @@ void app_main(){
     }
     
     logi_now("\n\nESP synced to rtc");
+
     
     //----------------------------------------------------------------------------------------------------------
     //Wifi part
@@ -382,10 +416,9 @@ void app_main(){
     
     ESP_ERROR_CHECK(wifi_sta_init());
     
+    int sock = 0; // for the socket connection 
 
-    xTaskCreatePinnedToCore(wifi_connection_task,  "wifi", configMINIMAL_STACK_SIZE * 10, (void *)NULL, 10,NULL, APP_CPU_NUM);
-
-
+    xTaskCreatePinnedToCore(wifi_connection_task,  "wifi", configMINIMAL_STACK_SIZE * 10, (void *)&sock, 10,NULL, APP_CPU_NUM);
 
 
 
@@ -403,11 +436,7 @@ void app_main(){
         ads1 = ads_create(ADS111X_ADDR_GND, ADS111X_DATA_RATE_860, ADS111X_MODE_SINGLE_SHOT);
         ads2 = ads_create(ADS111X_ADDR_VCC, ADS111X_DATA_RATE_860, ADS111X_MODE_SINGLE_SHOT);
     }
-    //----------------------------------------------------------------------------------------------------------
    
-   
-    
-
     ads_sensor* lm35 = ads_sensor_create("lm35_1",LM35_1, ads1, ADS111X_GAIN_1V024, ADS111X_MUX_0_GND, MIN_READ_TIME);
     ads_sensor* lm35_2 = ads_sensor_create("lm35_2",LM35_2, ads2, ADS111X_GAIN_1V024, ADS111X_MUX_0_GND,MIN_READ_TIME);
     
@@ -423,13 +452,22 @@ void app_main(){
     const uint8_t len =  sizeof(sensors)/sizeof(ads_sensor*);
     QueueHandle_t sensor_data_queue = xQueueCreate(min(len*4, QUEUE_SIZE), sizeof(ads_sensor**));
     
+    //----------------------------------------------------------------------------------------------------------------------
+    //buttons (here because other task uses this queue to)
+    // buttons 
+
+    uint8_t btn_n = get_btn_array_len();
     
+    QueueHandle_t btn_queue = xQueueCreate(btn_n+1, sizeof(gpio_num_t));
+
+
     
     //----------------------------------------------------------------------------------------------------------------------------
+    // store 
 
     QueueHandle_t eio_flag_queue = xQueueCreate(2, sizeof(bool));
 
-    sdmmc_card_t *card;
+    // sdmmc_card_t *card;
     task_sd_params sd_params = {
         .mode = STORAGE_MODE,
         .queue = eio_flag_queue,
@@ -438,7 +476,7 @@ void app_main(){
     };
 
     if(STORAGE_MODE == SD_CARD_MODE || STORAGE_MODE == SD_CARD_AND_STREAM_MODE){
-        sd_card_init(&card);
+        // sd_card_init(&card);
         
         xTaskCreatePinnedToCore(task_init_and_check_sd_storage, "task_init_sd", configMINIMAL_STACK_SIZE * 10,  (void *)&sd_params, 10, NULL, PRO_CPU_NUM);
        
@@ -446,7 +484,9 @@ void app_main(){
     
     task_store_data_params queues = {
         .data_queue = sensor_data_queue,
-        .eio_queue = eio_flag_queue
+        .eio_queue = eio_flag_queue,
+        .buttons_queue= btn_queue,
+        .socket = &sock
     };
     xTaskCreatePinnedToCore(task_store_data, "task_store_data", configMINIMAL_STACK_SIZE * 10,  (void *)&queues, 6, NULL, PRO_CPU_NUM);
 // -----------------------------------------------------------------------------------------------
@@ -463,17 +503,13 @@ void app_main(){
     }
 
 
-
-    uint8_t btn_n = get_btn_array_len();
+    //-----------------------------------------------------------------------------------------------------------------------
     
-    QueueHandle_t btn_queue = xQueueCreate(btn_n+1, sizeof(gpio_num_t));
     
-
     Button buttons[btn_n];
-    uint8_t i;
     // Install ISR service
     gpio_install_isr_service(ESP_INTR_FLAG_EDGE);
-    for(i =0;i < btn_n ;i++){
+    for(uint8_t i =0; i < btn_n ; i++){
         buttons[i].pin = index_to_pin(i);
         buttons[i].queue = btn_queue;
         configure_button(buttons+i, handler_buttons_isr);
@@ -490,6 +526,8 @@ void app_main(){
 
     xTaskCreatePinnedToCore(task_btns, "task_btns", configMINIMAL_STACK_SIZE * 10,  (void *)&info, 15, NULL, PRO_CPU_NUM);
 
+
+    //----------------------------------------------------------------------------------------------------------------
     while (1){
         vTaskDelay(portMAX_DELAY);
     }

@@ -222,12 +222,13 @@ char* setup_file_directory(const char* sensor_name, char * full_file_path){
 
     char dir_name[9];
     char file_name[9];
+    int dac_id = CONFIG_ESP_DAC_ID;
     // char full_file_path[MAX_CHAR_SIZE];
     
     strftime(dir_name, sizeof(dir_name), "%y_%m_%d", &time_info);
     strftime(file_name, sizeof(file_name), "%H_%M_%S", &time_info);
 
-    snprintf(full_file_path,strlen(dir_name)+strlen(sensor_name)+strlen(file_name)+7 , "%s/%s/%s.txt",  dir_name, sensor_name,file_name);
+    snprintf(full_file_path,9+strlen(dir_name)+strlen(sensor_name)+strlen(file_name)+7 , "DAC_%04d/%s/%s/%s.txt",  dac_id, dir_name, sensor_name,file_name);
       
     return full_file_path;
 }

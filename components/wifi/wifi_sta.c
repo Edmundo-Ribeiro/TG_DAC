@@ -237,14 +237,21 @@ esp_err_t wifi_sta_start_driver(){
 }
 
 
+
 void wifi_connection_task(void *pvParameters) {
 
-    config_clock_system(); // setup the timezone, sync mode and what happens when the clock is synced
-    wifi_sta_start_driver();// config the ssid and password, setup as STA mode, start the modules 
+    int* p_sock = (int*)pvParameters;
+    int sock = 0;
 
+    
+    wifi_sta_start_driver();// config the ssid and password, setup as STA mode, start the modules 
+    config_clock_system();
     EventBits_t result;
     TickType_t wait_time = portMAX_DELAY;
     sntp_sync_status_t sync_status;
+
+
+    bool flag_network_connected = false;
 
     while (1) {
 
@@ -255,10 +262,17 @@ void wifi_connection_task(void *pvParameters) {
             ESP_LOGI(TAG_WIFI, "connect again");
             esp_wifi_connect();
             wait_time = portMAX_DELAY;
+            flag_network_connected = false;
+            //close socket
+            if(sock){
+                close(sock);
+            }
+            ESP_LOGW(TAG_SOCK, "Socket closed");
             break;
         
         
         case CONNECTED_GOT_IP:
+            flag_network_connected = true;      
             wifi_ap_record_t ap_info;
             esp_err_t err = esp_wifi_sta_get_ap_info(&ap_info);
             if (!esp_sntp_enabled()) {
@@ -274,16 +288,40 @@ void wifi_connection_task(void *pvParameters) {
                 }
             }
 
-            wait_time = pdMS_TO_TICKS(5000);
+            //create socket
+            sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+
+            if (sock < 0){
+                ESP_LOGE(TAG_SOCK, "Failed to create socket");
+                //implement retry
+            }
+            *p_sock = sock;
+
+
+            wait_time = pdMS_TO_TICKS(10000);
             break;
 
             default:
-            ESP_LOGW(TAG_WIFI, "testing");
+                // ESP_LOGI(TAG_WIFI, "...ok");
             //verificar se deve parar e desconectar do wifi para iniciar leituras, suspender essa task
             break;
         }
-       
 
+        if(flag_network_connected){
+            if(stream_data(sock, "\n", 3 ) != ESP_OK){ // basically a kind of keep alive
+                close(sock);
+                sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+
+                if (sock < 0){
+                    ESP_LOGE(TAG_SOCK, "Failed to create socket");
+                    //implement retry
+                }
+
+                socket_connect(sock);
+
+                *p_sock = sock;
+            }
+        }
         // vTaskDelay(pdMS_TO_TICKS(5000));  // Check every 5 seconds
     }
 }
@@ -294,8 +332,6 @@ void _wifi_sta_disconnect(){
     ESP_ERROR_CHECK(esp_wifi_stop());
     ESP_LOGI(TAG_WIFI, "***********DISCONNECTING COMPLETE*********");
 }
-
-
 
 
 
@@ -332,9 +368,14 @@ esp_err_t socket_connect(int sock){
     server_addr.sin_port = htons(server_port);
     server_addr.sin_addr.s_addr = inet_addr(server_ip);
 
-    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0){
+    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0){//tentar mudar para um send vazio
+        if(errno == EISCONN){
+            ESP_LOGW(TAG_SOCK, "Server socket already connected");
+            errno = 0;
+            return ESP_ERR_INVALID_STATE;
+        }
+
         ESP_LOGE(TAG_SOCK, "Failed to connect to server");
-        close(sock);
         return ESP_FAIL;
     }
     ESP_LOGI(TAG_SOCK, "Socket connected");
@@ -410,7 +451,7 @@ esp_err_t stream_file(int sock, const char* file_path, const char* file_name, ui
         }
 
         if(send(sock, buffer, strlen(buffer), 0) > 0){
-            ESP_LOGD(TAG_SOCK, "Data sent: [%s]", buffer);
+            ESP_LOGD(TAG_SOCK, "Data sent: [%s", buffer);
             total_sent += BUFFER_SIZE;
             ESP_LOGI(TAG_SOCK, "FILE transfer: %lu %%", (100*total_sent/file_size));
         }
@@ -429,18 +470,41 @@ esp_err_t stream_data(int sock, char* data, uint8_t retries ){
 
     while(retries--){
         if(send(sock, data, strlen(data), 0) >= 0){
-            ESP_LOGI(TAG_SOCK, "Data sent: [%s]", data);
+            ESP_LOGI(TAG_SOCK, "Data sent: [%s", data);
             return ESP_OK;
         }
         
-        ESP_LOGE(TAG_SOCK, "Failed to send [%s]",data);
+        ESP_LOGE(TAG_SOCK, "Failed to send [%s",data);
         ESP_LOGI(TAG_SOCK, "Retrying to send data... {%u}",retries);
     }
 
     ESP_LOGE(TAG_SOCK, "Used all the retries attempts");
+    
     return ESP_FAIL;
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//CLOCK THINGS -------------------------------------------------------------------------------
 
 
 void time_sync_notification_cb(struct timeval *tv){
@@ -462,10 +526,14 @@ void time_sync_notification_cb(struct timeval *tv){
 
 }
 
-void config_clock_system(){
 
+void config_timezone(){
     setenv("TZ", "UTC+03", 1);  
     tzset();
+}
+void config_clock_system(){
+
+    
     sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
 
     sntp_set_time_sync_notification_cb(time_sync_notification_cb);
