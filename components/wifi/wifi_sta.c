@@ -3,6 +3,7 @@
 const int CONNECTED_GOT_IP = BIT0;
 const int DISCONNECTED = BIT1;
 
+static EventGroupHandle_t wifi_events;
 
 
 static char *print_disconnection_error(wifi_err_reason_t reason){
@@ -244,117 +245,17 @@ esp_err_t get_rssi(int8_t * rssi){
 
 }
 
-void wifi_connection_task(void *pvParameters) {
-
-    int* p_sock = (int*)pvParameters;
-    int sock = 0;
-    int8_t rssi;
-    
-    wifi_sta_start_driver();// config the ssid and password, setup as STA mode, start the modules 
-    config_clock_system();
-    EventBits_t result;
-    TickType_t wait_time = portMAX_DELAY;
-    sntp_sync_status_t sync_status;
 
 
-    bool flag_network_connected = false;
 
-    while (1) {
-        vTaskDelay(portMAX_DELAY);
-        result = xEventGroupWaitBits(wifi_events, CONNECTED_GOT_IP | DISCONNECTED, pdTRUE, pdFALSE, wait_time);
-        switch (result){
-
-        case DISCONNECTED:
-
-            flag_network_connected = false;
-            ESP_LOGI(TAG_WIFI, "connecting again...");
-            esp_wifi_connect();
-            wait_time = portMAX_DELAY;
-
-
-            //close socket
-            if(sock){
-                close(sock);
-                ESP_LOGW(TAG_SOCK, "Socket closed");
-            }
-
-
-            break;
-        
-        
-        case CONNECTED_GOT_IP:
-            flag_network_connected = true;      
-
-            //start the sntp client 
-            if (!esp_sntp_enabled()) {
-                // sntp_set_sync_interval(1200000);
-                esp_sntp_init();
-            }
-
-            
-            if ( get_rssi(&rssi) == ESP_OK) {
-                if (rssi > -60) {
-                    ESP_LOGI(TAG_WIFI,"Connected to Wi-Fi: rssi=%d\n",rssi );
-                } else {
-                    ESP_LOGI(TAG_WIFI,"Wi-Fi signal strength is weak: rssi=%d\n",rssi );
-                }
-            }
-
-            //create socket
-            sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
-
-            if (sock < 0){
-                ESP_LOGE(TAG_SOCK, "Failed to create socket");
-                //implement retry
-            }
-            *p_sock = sock;
-
-
-            wait_time = pdMS_TO_TICKS(10000);
-            break;
-
-            default:
-                // ESP_LOGI(TAG_WIFI, "...ok");
-            //verificar se deve parar e desconectar do wifi para iniciar leituras, suspender essa task
-            break;
-        }
-
-        if(flag_network_connected){
-            if(stream_data(sock, "\n", 3 ) != ESP_OK){ // basically a kind of keep alive
-                close(sock);
-                sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
-
-                if (sock < 0){
-                    ESP_LOGE(TAG_SOCK, "Failed to create socket");
-                    //implement retry
-                }
-
-                socket_connect(sock);
-
-                *p_sock = sock;
-            }
-        }
-        
-       
-        
-        if ( get_rssi(&rssi) == ESP_OK) {
-            if (rssi > -60) {
-                ESP_LOGI(TAG_WIFI,"Connected to %s: rssi=%d\n",CONFIG_WIFI_SSID,rssi );
-            } else {
-                ESP_LOGW(TAG_WIFI,"%s signal strength is weak: rssi=%d\n",CONFIG_WIFI_SSID,rssi );
-            }
-        }  // vTaskDelay(pdMS_TO_TICKS(5000));  // Check every 5 seconds
+int new_tcp_socket(){
+    int tcp_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (tcp_sock < 0) {
+        ESP_LOGE(TAG_SOCK,"Failed to create TCP socket");
+        return -1;
     }
+    return tcp_sock;
 }
-
-void _wifi_sta_disconnect(){
-    ESP_LOGI(TAG_WIFI, "**********DISCONNECTING FROM %s*********", WIFI_SSID);
-    ESP_ERROR_CHECK(esp_wifi_disconnect());
-    ESP_ERROR_CHECK(esp_wifi_stop());
-    ESP_LOGI(TAG_WIFI, "***********DISCONNECTING COMPLETE*********");
-}
-
-
 
 esp_err_t setup_udp_socket(int * p_sock){
 
@@ -402,7 +303,7 @@ void setup_tcp_socket(struct sockaddr_in *tcp_server_addr,in_addr_t server_ip){
 }
 
 
-esp_err_t send_broadcast(int sock, struct sockaddr_in *broadcast_addr, char*msg){
+esp_err_t send_broadcast(int sock, struct sockaddr_in *broadcast_addr, const char*msg){
     ESP_LOGI(TAG_SOCK,"sending broadcast...");
     if (sendto(sock, msg, strlen(msg), 0, (struct sockaddr *)broadcast_addr, sizeof(*broadcast_addr)) < 0) {
             ESP_LOGW(TAG_SOCK,"Failed to send broadcast message");
@@ -430,6 +331,165 @@ esp_err_t tcp_socket_connect(int tcp_sock,struct sockaddr_in *tcp_server_addr ){
     return ESP_OK;
 
 }
+
+
+
+
+void wifi_connection_task(void *pvParameters) {
+
+    int* p_tcp_sock = (int*)pvParameters;
+    int udp_sock;
+    int tcp_sock = 0;
+    int8_t rssi;
+    
+    wifi_sta_start_driver();// config the ssid and password, setup as STA mode, start the modules 
+    config_clock_system();
+    EventBits_t result;
+    TickType_t wait_time = portMAX_DELAY;
+    sntp_sync_status_t sync_status;
+
+    struct sockaddr_in broadcast_addr;
+    setup_broadcast(&broadcast_addr);
+
+    struct sockaddr_in tcp_server_addr;
+
+    bool flag_network_connected = false;
+    bool flag_need_new_tcp_sock = true;
+
+    const char message[MAX_RESPONSE_LEN];
+    snprintf(message, sizeof(message), "I'm the ESP_DAC %04d!", CONFIG_ESP_DAC_ID);
+
+    struct sockaddr_in server;
+    socklen_t server_len = sizeof(server);
+    char response[MAX_RESPONSE_LEN];
+    int recv_len;
+    
+    while (1) {
+        result = xEventGroupWaitBits(wifi_events, CONNECTED_GOT_IP | DISCONNECTED, pdTRUE, pdFALSE, wait_time);
+        switch (result){
+
+        case DISCONNECTED:
+
+            flag_network_connected = false;
+            ESP_LOGI(TAG_WIFI, "connecting again...");
+            esp_wifi_connect();
+            wait_time = portMAX_DELAY;
+
+
+            //close socket
+            if(tcp_sock){
+                close(tcp_sock);
+                ESP_LOGW(TAG_SOCK, "TCP socket closed");
+            }
+
+             if(udp_sock){
+                close(udp_sock);
+                ESP_LOGW(TAG_SOCK, "UDP socket closed");
+            }
+
+            flag_need_new_tcp_sock = true;
+
+
+            break;
+        
+        
+        case CONNECTED_GOT_IP:
+            flag_network_connected = true;      
+
+            //start the sntp client 
+            if (!esp_sntp_enabled()) {
+                // sntp_set_sync_interval(1200000);
+                esp_sntp_init();
+            }
+
+            
+            if ( get_rssi(&rssi) == ESP_OK) {
+                if (rssi > -60) {
+                    ESP_LOGI(TAG_WIFI,"Connected to Wi-Fi: rssi=%d\n",rssi );
+                } else {
+                    ESP_LOGI(TAG_WIFI,"Wi-Fi signal strength is weak: rssi=%d\n",rssi );
+                }
+            }
+
+            setup_udp_socket(&udp_sock);
+            
+            wait_time = pdMS_TO_TICKS(10000);
+            break;
+
+            default:
+                // ESP_LOGI(TAG_WIFI, "...ok");
+            //verificar se deve parar e desconectar do wifi para iniciar leituras, suspender essa task
+            break;
+        }
+
+        if(flag_network_connected){
+
+            if(flag_need_new_tcp_sock){
+                if(send_broadcast(udp_sock, &broadcast_addr, message) != ESP_OK){
+                    continue;
+                }
+
+                recv_len = recvfrom(udp_sock, response, sizeof(response) - 1, 0, (struct sockaddr *)&server, &server_len);
+                if (recv_len < 0) {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        ESP_LOGW(TAG_SOCK,"No response received within the timeout");
+                    } else {
+                        ESP_LOGW(TAG_SOCK,"Failed to receive response");
+                    }
+                    continue;
+                }
+
+                response[recv_len] = '\0';
+
+                ESP_LOGI(TAG_SOCK,"\nReceived response from server: %s\n", response);
+
+                if((inet_addr(response) != server.sin_addr.s_addr)){
+                    ESP_LOGW(TAG_SOCK,"Response is not the server ip");
+                    continue;
+                }
+
+                tcp_sock = new_tcp_socket();
+               
+                setup_tcp_socket(&tcp_server_addr, server.sin_addr.s_addr);
+                if(tcp_socket_connect(tcp_sock, &tcp_server_addr)!= ESP_OK){
+                    continue;
+                }
+                *p_tcp_sock = tcp_sock;
+                flag_need_new_tcp_sock = false;
+            }
+            else{
+
+                if(stream_data(tcp_sock, "+\n", 3 ) != ESP_OK){ // basically a kind of keep alive
+                    close(tcp_sock);
+                    ESP_LOGW(TAG_SOCK, "Closing tcp socket");
+                    tcp_sock = new_tcp_socket();
+                    flag_need_new_tcp_sock = true;
+
+                    *p_tcp_sock = tcp_sock;
+                }
+            }
+
+        
+    
+        
+            if ( get_rssi(&rssi) == ESP_OK) {
+                if (rssi > -60) {
+                    ESP_LOGI(TAG_WIFI,"\nConnected to %s: rssi=%d\n",CONFIG_WIFI_SSID,rssi );
+                } else {
+                    ESP_LOGW(TAG_WIFI,"\n%s signal strength is weak: rssi=%d\n",CONFIG_WIFI_SSID,rssi );
+                }
+            }  // vTaskDelay(pdMS_TO_TICKS(5000));  // Check every 5 seconds
+        }
+    }
+}
+
+void _wifi_sta_disconnect(){
+    ESP_LOGI(TAG_WIFI, "**********DISCONNECTING FROM %s*********", WIFI_SSID);
+    ESP_ERROR_CHECK(esp_wifi_disconnect());
+    ESP_ERROR_CHECK(esp_wifi_stop());
+    ESP_LOGI(TAG_WIFI, "***********DISCONNECTING COMPLETE*********");
+}
+
 
 void task_udp_test(void *pvParameters) {
 
@@ -493,48 +553,6 @@ void task_udp_test(void *pvParameters) {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-esp_err_t socket_connect(int sock){
-    char server_ip[] = SERVER_IP;
-    int server_port = SERVER_PORT;
-    struct sockaddr_in server_addr;
-
-    // struct sockaddr_in* p_server_addr = &server_addr;
-
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(server_port);
-    server_addr.sin_addr.s_addr = inet_addr(server_ip);
-
-    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0){//tentar mudar para um send vazio
-        if(errno == EISCONN){
-            ESP_LOGW(TAG_SOCK, "Server socket already connected");
-            errno = 0;
-            return ESP_ERR_INVALID_STATE;
-        }
-
-        ESP_LOGE(TAG_SOCK, "Failed to connect to server");
-        return ESP_FAIL;
-    }
-    ESP_LOGI(TAG_SOCK, "Socket connected");
-    return ESP_OK;
-}
-
-
-void socket_disconnect(){
-
-}
 
 
 off_t getFileSize(const char *filename) {
@@ -617,12 +635,22 @@ esp_err_t stream_file(int sock, const char* file_path, const char* file_name, ui
 
 esp_err_t stream_data(int sock, char* data, uint8_t retries ){
 
+    char aux[128];
+    memset(aux,'\0',sizeof(aux));
+    snprintf(aux,sizeof(aux),"%s",data);
+
+    ssize_t send_return;
+
     while(retries--){
-        if(send(sock, data, strlen(data), 0) >= 0){
-            ESP_LOGI(TAG_SOCK, "Data sent: [%s", data);
+        send_return = send(sock, aux, sizeof(aux), 0);
+        if(send_return > 0){
+            ESP_LOGI(TAG_SOCK, "%d bytes, sent: [%s",sizeof(aux), aux);
             return ESP_OK;
         }
-        
+        else if(send_return == 0){
+            ESP_LOGE(TAG_SOCK, "send return = 0");
+        }
+
         ESP_LOGE(TAG_SOCK, "Failed to send [%s",data);
         ESP_LOGI(TAG_SOCK, "Retrying to send data... {%u}",retries);
     }

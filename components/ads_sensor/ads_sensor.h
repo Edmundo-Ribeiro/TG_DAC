@@ -28,14 +28,14 @@ typedef struct{
     ads111x_mux_t mux;
     ads111x_gain_t gain;
     char name[12];
-    char full_current_file_path[128];
+    char full_current_file_path[40];
 } ads_sensor;
 
 typedef struct {
     uint8_t id;
     int16_t value;
     uint64_t timestamp;
-    char full_current_file_path[128];
+    char full_current_file_path[40];
 } sensor_data;
 
 typedef struct{

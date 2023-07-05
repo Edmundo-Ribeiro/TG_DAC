@@ -32,7 +32,6 @@
 #define MAXIMUM_RETRY  CONFIG_WIFI_CONN_MAX_RETRY
 
 
-#define SERVER_IP  "192.168.1.130"//"10.0.0.101"
 #define SERVER_PORT  23
 #define BUFFER_SIZE  1024
 
@@ -45,7 +44,6 @@
 #define TAG_SOCK "SOCKET"
 #define TAG_RTC "RTC"
 
-static EventGroupHandle_t wifi_events;
 
 
 static char *print_disconnection_error(wifi_err_reason_t reason);

@@ -2,5 +2,5 @@ build/
 sdkconfig
 sdkconfig.old
 .vscode/*
-/DAC_*
+DAC_*
 DAC_0010/*

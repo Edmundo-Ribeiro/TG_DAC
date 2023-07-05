@@ -77,17 +77,25 @@ typedef enum{
 
 // Important defines here ----------------------------------------------------
 #define TAG_MAIN "MAIN"
-#define QUEUE_SIZE 30
-#define DATA_FORMAT "%u,%d,%llu\n"
+#define QUEUE_SIZE 50
+#define DATA_FORMAT "%u,%d,%llu,\n"
 //------------------------------------------------------------------------------------
 
 #define LED_PIN 2
 TaskHandle_t alarm_led;
 static void task_alarm_led(void* params){
 
-    uint8_t blinks;
+    uint8_t blinks = 5;
     while(1){
-
+        while (blinks--){
+            gpio_set_level(LED_PIN, 1);
+            vTaskDelay(pdMS_TO_TICKS(100));
+        
+            gpio_set_level(LED_PIN, 0);
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        blinks = 5;
+        
         gpio_set_level(LED_PIN, 1);
         vTaskDelay(pdMS_TO_TICKS(1500));
         
@@ -99,7 +107,7 @@ static void task_alarm_led(void* params){
 void set_indication_led(){
     gpio_reset_pin(LED_PIN);
     gpio_set_direction(LED_PIN, GPIO_MODE_OUTPUT);
-    // xTaskCreate(task_alarm_led, "alarm", configMINIMAL_STACK_SIZE, NULL, 10, &alarm_led);
+    // xTaskCreate(task_alarm_led, "alarm", configMINIMAL_STACK_SIZE, NULL, 1, &alarm_led);
     // vTaskSuspend(alarm_led);
 }
 void start_alarm(){
@@ -116,10 +124,8 @@ typedef struct {
 typedef  esp_err_t (*read_sensor_function) (ads_sensor*);
 
 static void task_read_ads_sensors(void* pvParams ){
-    uint8_t i;
     BaseType_t space_available;
     BaseType_t xStatus;
-    sensor_data data;
     
 
     //get the necessary parameters for the task
@@ -142,23 +148,27 @@ static void task_read_ads_sensors(void* pvParams ){
         // ESP_LOGI(sensor->name,"--------------------------------------------------------------------------------");
         
         space_available = uxQueueSpacesAvailable(sensor_data_queue);
-        ESP_LOGI(TAG_TC, "Spaces available in queue: %d",space_available );
+
+        if(space_available < QUEUE_SIZE/2){
+            ESP_LOGW(TAG_TC, "half space available in queue: %d spaces",space_available );
+        }
 
         if (!space_available){
-            ESP_LOGW(TAG_TC, "Queue Full, couldn't send data to queue");
-            continue;
+            ESP_LOGW(TAG_TC, "Queue Full, data will be lost");
         }
-        
-        read_sensor(sensor);
+        else{
 
-        xStatus = xQueueSend(sensor_data_queue, &sensor, pdMS_TO_TICKS(10));
-        if (xStatus == errQUEUE_FULL){
-            ESP_LOGW(TAG_TC, "Queue full");
-        }else if(xStatus != pdPASS){
-            ESP_LOGW(TAG_TC, "Could not send data to queue");
+            read_sensor(sensor);
+
+            xStatus = xQueueSend(sensor_data_queue, &sensor, pdMS_TO_TICKS(20));
+            if (xStatus == errQUEUE_FULL){
+                ESP_LOGW(TAG_TC, "Queue full");
+            }else if(xStatus != pdPASS){
+                ESP_LOGW(TAG_TC, "Could not send data to queue");
+            }
+
+            ESP_LOGI(TAG_TC, "Sent data to Queue: [%u] %d - %llu = [%lf]mv", sensor->id,sensor->value,sensor->timestamp,raw_to_mv(sensor->value,sensor->gain) );
         }
-
-        ESP_LOGI(TAG_TC, "Sent data to Queue: [%u] %d - %llu = [%lf]mv", sensor->id,sensor->value,sensor->timestamp,raw_to_mv(sensor->value,sensor->gain) );
            
         
         // ESP_LOGI(sensor->name,"--------------------------------------------------------------------------------");
@@ -176,7 +186,7 @@ typedef struct {
     QueueHandle_t eio_queue;  
     QueueHandle_t data_queue;
     QueueHandle_t buttons_queue;
-    int socket;
+    int *socket;
 }task_store_data_params;
 
 
@@ -188,7 +198,7 @@ static void task_store_data(void *pvParams){
     int *sockfd = ((task_store_data_params* ) pvParams)->socket;
 
     ads_sensor *received_sensor;
-    char str_data[MAX_CHAR_SIZE];
+    char str_data[30]; //64bytes
     esp_err_t err;
 
     gpio_num_t stop_button = STOP_MESURES_BT;
@@ -200,7 +210,7 @@ static void task_store_data(void *pvParams){
         // Wait for data in the queue
        
         while(xQueueReceive(sensor_data_queue, &received_sensor, portMAX_DELAY)== pdPASS){
-            
+
 
             snprintf(
                 str_data,
@@ -234,15 +244,16 @@ static void task_store_data(void *pvParams){
                 break;
 
                 case STREAM_MODE:
-                    char data_to_stream[BUFFER_SIZE];
+                    char data_to_stream[88];
                     snprintf(data_to_stream,sizeof(data_to_stream),"%s:%s",received_sensor->full_current_file_path,str_data);
                     
                     
                     if(stream_data(*sockfd, data_to_stream, 2 ) == ESP_FAIL){
-                        if(fails_count > 20){
+                        if(fails_count > 10){
                             ESP_LOGW(TAG_SOCK, "To many socket sends failed. Stopping stream...");
                             xQueueSend(buttons_queue, &stop_button, 0);
                             fails_count = 0;
+                            
                         }else{
                             fails_count +=1;
                         }
@@ -274,13 +285,12 @@ void task_init_and_check_sd_storage(void* pvParams){
 
     data_saving_mode running_mone = ((task_sd_params*) pvParams)->mode;
     QueueHandle_t flag_queue = ((task_sd_params*) pvParams)->queue;
-    ads_sensor** sensors = ((task_sd_params*) pvParams)->p_sensors; // convert the params into **ads_sensors aka an array of sensors 
-    uint8_t len = ((task_sd_params*) pvParams)->sensors_len;
-    uint8_t i;
+    // ads_sensor** sensors = ((task_sd_params*) pvParams)->p_sensors; // convert the params into **ads_sensors aka an array of sensors 
+    // uint8_t len = ((task_sd_params*) pvParams)->sensors_len;
     esp_err_t err;
     sdmmc_card_t *card;
     bool flag_eio;
-    bool flag_mounted_before = false;
+    // bool flag_mounted_before = false;
 
     while(1){
         err = sd_card_init(&card);
@@ -289,7 +299,7 @@ void task_init_and_check_sd_storage(void* pvParams){
             ESP_LOGI(TAG_SD, "SD card initialized!");
             STORAGE_MODE = running_mone; //todo :create a function for properly changing the operation mode
             sdmmc_card_print_info(stdout, card);
-            flag_mounted_before = true;
+            // flag_mounted_before = true;
             
 
 
@@ -391,22 +401,10 @@ static void task_btns(void* _args){
 
 
 
+
+
+
 void app_main(){
-    ESP_ERROR_CHECK(wifi_sta_init());
-    
-    int sock = 0; // for the socket connection 
-
-    xTaskCreatePinnedToCore(wifi_connection_task,  "wifi", configMINIMAL_STACK_SIZE * 10, (void *)&sock, 10,NULL, APP_CPU_NUM);
-        xTaskCreatePinnedToCore(task_udp_test,  "udp", configMINIMAL_STACK_SIZE * 10, (void *)&sock, 10,NULL, APP_CPU_NUM);
-
-    while (1){
-        vTaskDelay(portMAX_DELAY);
-    }
-    
-}
-
-
-void tmp_app_main(){
 
     //setup the led indication task for when a problem happens
     set_indication_led();
@@ -474,7 +472,7 @@ void tmp_app_main(){
         themocouple_copy, 
     };
     const uint8_t len =  sizeof(sensors)/sizeof(ads_sensor*);
-    QueueHandle_t sensor_data_queue = xQueueCreate(min(len*4, QUEUE_SIZE), sizeof(ads_sensor**));
+    QueueHandle_t sensor_data_queue = xQueueCreate(min(len*8, QUEUE_SIZE), sizeof(ads_sensor**));
     
     //----------------------------------------------------------------------------------------------------------------------
     //buttons (here because other task uses this queue to)
@@ -501,7 +499,6 @@ void tmp_app_main(){
 
     if(STORAGE_MODE == SD_CARD_MODE || STORAGE_MODE == SD_CARD_AND_STREAM_MODE){
         // sd_card_init(&card);
-        
         xTaskCreatePinnedToCore(task_init_and_check_sd_storage, "task_init_sd", configMINIMAL_STACK_SIZE * 10,  (void *)&sd_params, 10, NULL, PRO_CPU_NUM);
        
     }
