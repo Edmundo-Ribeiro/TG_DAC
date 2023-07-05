@@ -122,7 +122,6 @@ i2c_dev_t* fake_ads_create(uint8_t address, ads111x_data_rate_t data_rate, ads11
 i2c_dev_t* ads_create(uint8_t address, ads111x_data_rate_t data_rate, ads111x_mode_t mode){
     i2c_dev_t *ads = malloc(sizeof(i2c_dev_t));
     memset(ads, 0, sizeof(i2c_dev_t));//MUITO IMPORTANTE !!!!
-
     if (ads == NULL){
         ESP_LOGE(TAG_TC,"Couldn't allocate memory for i2c device");
         return NULL;

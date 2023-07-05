@@ -9,19 +9,38 @@ import time
 
 KEEPALIVE = '+'
 
+
 def convert_timestamp(epoch_microseconds):
     timestamp = datetime.datetime.fromtimestamp(epoch_microseconds / 1000000.0)
     return timestamp.strftime("%d-%m-%Y %H:%M:%S")
 
-def evaluate_format(data):
+def separate_tokens(data):
     pattern = r'(DAC_\d{4})/(\d{2}_\d{2}_\d{2})/(\w{1,8})/(\d{2}_\d{2}_\d{2}\.txt):(\d+),(-?\d+),(\d+),'
     match = re.match(pattern, data)
     if match:
         dir1, dir2, dir3, filename, id_value, value, timestamp = match.groups()
-        save_data_to_file(f"{id_value},{value},{timestamp}\n", dir1+"/"+dir2+"/"+dir3+"/", filename)
-        return "ESP_OK"
+        print("\n")
+        print("------------------------")
+        print("Valid format:")
+        print("Filename:", filename)
+        print("Dir:", dir1+"/"+dir2+"/"+dir3+"/")
+        print("ID:", id_value)
+        print("Value:", value)
+        print("Timestamp:", timestamp)
+        print("Timestamp:",convert_timestamp(int(timestamp)))
+        print("------------------------")
+        print("\n")
+        return (dir1, dir2, dir3, filename, id_value, value, timestamp)
+
+    return (0, 0, 0, 0, 0, 0, 0)        
+
+def evaluate_format(data):
+    dir1, dir2, dir3, filename, id_value, value, timestamp = separate_tokens(data)
+    if(dir1):
+        return "ESP_OK" 
     else:
         print("\n\nInvalid format. Saving for later:", data)
+        
         return data if data != '' else "ESP_OK"
 
 def save_data_to_file(data, file_path, filename):
@@ -32,50 +51,76 @@ def save_data_to_file(data, file_path, filename):
 
 stop_flag = threading.Event()
 
-def threaded_client(sock):
+
+def threaded_client(sock,msg):
+    invalid_count = 0
+    valid_count = 0
+    recuperated_count = 0
+    total = 0
+    
     sock.setblocking(0)
     max_idle_time = 30  # s
     last_data_timestamp = time.time()
     aux_timestamp = 0
     preverr = ''
-
+    buffer = ''
+    delimiter = '\n'
     while not stop_flag.is_set():
         try:
             data = sock.recv(1024).decode().replace('\0','')
+            
+           
             if not data:
                 raise ValueError("no data")
 
             last_data_timestamp = time.time()
-            streams = data.split("\n")
-            for stream in streams:
-                if not len(stream):
-                    continue
-                if stream == KEEPALIVE:
-                    continue
 
-                err = evaluate_format(stream)
+            buffer+=data
+
+            while delimiter in buffer:
+                message, _, buffer = buffer.partition(delimiter)
+                if message == KEEPALIVE:
+                    continue
+                total+=1
+                err = evaluate_format(message)
                 if err != "ESP_OK":
+                    invalid_count+=1
                     print("preverr: ", preverr)
                     print("err: ", err)
                     print("result: ", preverr + err)
-                    evaluate_format(preverr + err)
-                    preverr = err
+                    err2= evaluate_format(preverr + err)
+                    if(err2 == 'ESP_OK'):
+                        print("recuperado: "+ preverr + err)
+                        recuperated_count+=1
+                else:
+                    valid_count+=1
+                
 
         except (socket.error, ValueError):
             seconds_since_last_data = int(time.time() - last_data_timestamp)
 
-            if seconds_since_last_data != aux_timestamp:
-                print(f"Remaining time for {sock.getsockname()} = {max_idle_time - seconds_since_last_data}")
-                aux_timestamp = seconds_since_last_data
+           
+            
+            if ((seconds_since_last_data %5)==0 and aux_timestamp != seconds_since_last_data):
+                print(f"{msg} - remaining idle time {sock.getpeername()} = {max_idle_time - seconds_since_last_data}s")
+                print("\n")
+                print(f"statistics for {msg[-5:]} = RECEIVED: {total} | VALID:{valid_count} | INVALID:{invalid_count} | REC:{recuperated_count}")
+                print(f"statistics for {msg[-5:]} = RECEIVED: {total} | VALID:{round(valid_count/max(total,1)*100,2)}% | INVALID:{round(invalid_count/max(total,1)*100,2)}% | REC:{round(recuperated_count/max(invalid_count,1)*100,2)}%")
+                print("\n")
+                
 
+            if(aux_timestamp != seconds_since_last_data):
+                aux_timestamp = seconds_since_last_data
             if seconds_since_last_data >= max_idle_time:
                 print("Idle time expired!")
                 break
 
-    print(f"Closing socket {sock.getsockname()}")
+    print(f"Closing socket {sock.getpeername()}")
+    # plot_data(data_points.values(), timestamps.values(), data_points.keys())
+    
     sock.close()
 
-def tcp_socket_server(config, port):
+def tcp_socket_server(config, port, msg):
     server_socket = socket.socket()
     
     try:
@@ -92,7 +137,7 @@ def tcp_socket_server(config, port):
         try:
             client_socket, address = server_socket.accept()
             print('Connected to:', address[0] + ':' + str(address[1]))
-            t = threading.Thread(target=threaded_client, args=(client_socket,))
+            t = threading.Thread(target=threaded_client, args=(client_socket, msg))
             t.start()
             print('Thread Number:', threading.active_count())
             break
@@ -116,12 +161,14 @@ def udp_socket_server(port):
             received_message = data.decode("utf-8")
             print(f"Received broadcast message: {received_message} from {client_address}")
             server_socket.sendto(server_ip.encode("utf-8"), client_address)
-            t_tcp = threading.Thread(target=tcp_socket_server, args=(socket.gethostname(), port))
+            t_tcp = threading.Thread(target=tcp_socket_server, args=(socket.gethostname(), port,received_message ))
             t_tcp.start()
         except Exception as ex:
             if(isinstance(ex,TimeoutError)):
                 continue
             print(ex)
+            server_socket.close()
+            server_socket.bind(("", port))
             pass
       
     print("Closing UDP server socket...")
@@ -137,6 +184,9 @@ def server():
             print("Quitting the server...")
             stop_flag.set()
             return
+        
+        
+            
 
 if __name__ == "__main__":
     server()

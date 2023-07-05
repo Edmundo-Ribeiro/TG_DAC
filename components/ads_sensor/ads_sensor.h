@@ -16,7 +16,7 @@
 #define SCL_IO_NUM 22
 //------------------------------------------------
 #define TAG_TC "Ads_sensor"
-#define MIN_READ_TIME 100
+#define MIN_READ_TIME 200
 
 
 typedef struct{

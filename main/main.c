@@ -47,7 +47,7 @@ typedef enum{
 #endif
 
 #ifdef CONFIG_FAKE_READ_SENSORS
-    uint8_t DATA_MODE = FAKE_READ_SENSORS;
+    uint8_t DATA_MODE = READ_SENSORS;
 #elif CONFIG_READ_SENSORS
     uint8_t DATA_MODE = READ_SENSORS;
 #endif 
@@ -107,6 +107,8 @@ static void task_alarm_led(void* params){
 void set_indication_led(){
     gpio_reset_pin(LED_PIN);
     gpio_set_direction(LED_PIN, GPIO_MODE_OUTPUT);
+    
+    gpio_set_level(LED_PIN, 0);
     // xTaskCreate(task_alarm_led, "alarm", configMINIMAL_STACK_SIZE, NULL, 1, &alarm_led);
     // vTaskSuspend(alarm_led);
 }
@@ -221,52 +223,42 @@ static void task_store_data(void *pvParams){
                 received_sensor->timestamp
             );
 
-
-            switch (STORAGE_MODE){
-                case SD_CARD_MODE:
-
+            if (STORAGE_MODE  == SD_CARD_MODE || STORAGE_MODE  == SD_CARD_AND_STREAM_MODE ){
                     err = write_on_file(received_sensor->full_current_file_path, str_data);
                     
                     if(err == ESP_ERR_INVALID_STATE){
                         bool eio_flag = true;
                         xQueueSend(eio_queue, &eio_flag, 0);
                     }
-
-                break;
-
-                case FAKE_SD_CARD_MODE:
-                    ESP_LOGI(TAG_SD,"fake storing on %s...",received_sensor->full_current_file_path);
-                    TickType_t simulated_delay = pdMS_TO_TICKS(getRandomInteger(5,50));//simulate i2c delay
-                    TickType_t lastTick = xTaskGetTickCount();
-                    while(lastTick - xTaskGetTickCount() < simulated_delay){//simulate delay for writing 
-                        //do nothing...
-                    }
-                break;
-
-                case STREAM_MODE:
-                    char data_to_stream[88];
-                    snprintf(data_to_stream,sizeof(data_to_stream),"%s:%s",received_sensor->full_current_file_path,str_data);
-                    
-                    
-                    if(stream_data(*sockfd, data_to_stream, 2 ) == ESP_FAIL){
-                        if(fails_count > 10){
-                            ESP_LOGW(TAG_SOCK, "To many socket sends failed. Stopping stream...");
-                            xQueueSend(buttons_queue, &stop_button, 0);
-                            fails_count = 0;
-                            
-                        }else{
-                            fails_count +=1;
-                        }
-                    }
-
-
-                break;
-            
-            default:
-                break;
             }
-            
 
+            if(STORAGE_MODE  == STREAM_MODE || STORAGE_MODE  == SD_CARD_AND_STREAM_MODE ){
+                char data_to_stream[88];
+                snprintf(data_to_stream,sizeof(data_to_stream),"%s:%s",received_sensor->full_current_file_path,str_data);
+                
+                
+                if(stream_data(*sockfd, data_to_stream, 2 ) == ESP_FAIL){
+                    if(fails_count > 10){
+                        ESP_LOGW(TAG_SOCK, "To many socket sends failed. Stopping stream...");
+                        xQueueSend(buttons_queue, &stop_button, 0);
+                        fails_count = 0;
+                        
+                    }else{
+                        fails_count +=1;
+                    }
+                }
+
+            }
+
+            if(STORAGE_MODE == FAKE_SD_CARD_MODE){
+                ESP_LOGI(TAG_SD,"fake storing on %s...",received_sensor->full_current_file_path);
+                TickType_t simulated_delay = pdMS_TO_TICKS(getRandomInteger(5,50));//simulate i2c delay
+                TickType_t lastTick = xTaskGetTickCount();
+                while(lastTick - xTaskGetTickCount() < simulated_delay){//simulate delay for writing 
+                    //do nothing...
+                }
+
+            }
         }
 
     }
@@ -449,30 +441,35 @@ void app_main(){
     
     i2c_dev_t* ads1;
     i2c_dev_t* ads2;
+    i2c_dev_t* ads3;
 
     if(DATA_MODE == FAKE_READ_SENSORS){
-        ads1 = fake_ads_create(ADS111X_ADDR_GND, ADS111X_DATA_RATE_860, ADS111X_MODE_SINGLE_SHOT);
-        ads2 = fake_ads_create(ADS111X_ADDR_VCC, ADS111X_DATA_RATE_860, ADS111X_MODE_SINGLE_SHOT);
+        ads1 = fake_ads_create(ADS111X_ADDR_GND, ADS111X_DATA_RATE_64, ADS111X_MODE_SINGLE_SHOT);
+        ads2 = fake_ads_create(ADS111X_ADDR_VCC, ADS111X_DATA_RATE_64, ADS111X_MODE_SINGLE_SHOT);
+        ads3 = fake_ads_create(ADS111X_ADDR_SCL, ADS111X_DATA_RATE_64, ADS111X_MODE_SINGLE_SHOT);
 
     }else{
-        ads1 = ads_create(ADS111X_ADDR_GND, ADS111X_DATA_RATE_860, ADS111X_MODE_SINGLE_SHOT);
-        ads2 = ads_create(ADS111X_ADDR_VCC, ADS111X_DATA_RATE_860, ADS111X_MODE_SINGLE_SHOT);
+        ads1 = ads_create(ADS111X_ADDR_GND, ADS111X_DATA_RATE_64, ADS111X_MODE_SINGLE_SHOT);
+        ads2 = ads_create(ADS111X_ADDR_VCC, ADS111X_DATA_RATE_64, ADS111X_MODE_SINGLE_SHOT);
+        ads3 = ads_create(ADS111X_ADDR_SCL, ADS111X_DATA_RATE_64, ADS111X_MODE_SINGLE_SHOT);
     }
    
-    ads_sensor* lm35 = ads_sensor_create("lm35_1",LM35_1, ads1, ADS111X_GAIN_1V024, ADS111X_MUX_0_GND, MIN_READ_TIME);
-    ads_sensor* lm35_2 = ads_sensor_create("lm35_2",LM35_2, ads2, ADS111X_GAIN_1V024, ADS111X_MUX_0_GND,MIN_READ_TIME);
     
-    ads_sensor* themocouple_1 = ads_sensor_create("termo1",THERMOCOUPLE_1, ads1, ADS111X_GAIN_0V256, ADS111X_MUX_2_3,MIN_READ_TIME);
-    ads_sensor* themocouple_copy = ads_sensor_create("termo2",THERMOCOUPLE_2, ads2, ADS111X_GAIN_0V256, ADS111X_MUX_2_3,MIN_READ_TIME);
+    ads_sensor* themocouple_1 = ads_sensor_create("termo1",THERMOCOUPLE_1, ads1, ADS111X_GAIN_0V256, ADS111X_MUX_0_1,MIN_READ_TIME);
+    ads_sensor* themocouple_2 = ads_sensor_create("termo2",THERMOCOUPLE_2, ads1, ADS111X_GAIN_0V256, ADS111X_MUX_2_3,MIN_READ_TIME);
+    ads_sensor* themocouple_3 = ads_sensor_create("termo3",THERMOCOUPLE_1, ads2, ADS111X_GAIN_0V256, ADS111X_MUX_0_1,MIN_READ_TIME);
+    ads_sensor* themocouple_4 = ads_sensor_create("termo4",THERMOCOUPLE_2, ads2, ADS111X_GAIN_0V256, ADS111X_MUX_2_3,MIN_READ_TIME);
+    ads_sensor* lm35 = ads_sensor_create("lm35_1",THERMOCOUPLE_2, ads3, ADS111X_GAIN_0V256, ADS111X_MUX_0_1,MIN_READ_TIME);
     
     ads_sensor* sensors[] = {
+        themocouple_1,
+        themocouple_2,
+        themocouple_3,
+        themocouple_4,
         lm35,
-        lm35_2,
-        themocouple_1, 
-        themocouple_copy, 
     };
     const uint8_t len =  sizeof(sensors)/sizeof(ads_sensor*);
-    QueueHandle_t sensor_data_queue = xQueueCreate(min(len*8, QUEUE_SIZE), sizeof(ads_sensor**));
+    QueueHandle_t sensor_data_queue = xQueueCreate(min(len*3, QUEUE_SIZE), sizeof(ads_sensor**));
     
     //----------------------------------------------------------------------------------------------------------------------
     //buttons (here because other task uses this queue to)

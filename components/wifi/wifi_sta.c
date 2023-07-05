@@ -474,9 +474,9 @@ void wifi_connection_task(void *pvParameters) {
         
             if ( get_rssi(&rssi) == ESP_OK) {
                 if (rssi > -60) {
-                    ESP_LOGI(TAG_WIFI,"\nConnected to %s: rssi=%d\n",CONFIG_WIFI_SSID,rssi );
+                    ESP_LOGI(TAG_WIFI,"Connected to %s: rssi=%d\n",CONFIG_WIFI_SSID,rssi );
                 } else {
-                    ESP_LOGW(TAG_WIFI,"\n%s signal strength is weak: rssi=%d\n",CONFIG_WIFI_SSID,rssi );
+                    ESP_LOGW(TAG_WIFI,"%s signal strength is weak: rssi=%d\n",CONFIG_WIFI_SSID,rssi );
                 }
             }  // vTaskDelay(pdMS_TO_TICKS(5000));  // Check every 5 seconds
         }
