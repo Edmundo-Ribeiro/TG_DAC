@@ -14,6 +14,24 @@ def convert_timestamp(epoch_microseconds):
     timestamp = datetime.datetime.fromtimestamp(epoch_microseconds / 1000000.0)
     return timestamp.strftime("%d-%m-%Y %H:%M:%S")
 
+def store_tokens(data):
+    pattern = r'(DAC_\d{4}/\d{2}_\d{2}_\d{2}/\w{1,8}/\d{2}_\d{2}_\d{2}\.txt):(\d+,-?\d+,\d+),'
+    match = re.match(pattern, data)
+    if match:
+        full_file_path, data = match.groups()
+        store_data(full_file_path, data)
+        return 1
+    return 0
+
+
+def store_data(full_file_path, data):
+    
+    file_path,file_name = os.path.split(full_file_path)
+    Path(file_path).mkdir(mode=777, parents=True, exist_ok=True)
+    with open(full_file_path, "a") as file:
+        file.write(data+'\n')
+
+
 def separate_tokens(data):
     pattern = r'(DAC_\d{4})/(\d{2}_\d{2}_\d{2})/(\w{1,8})/(\d{2}_\d{2}_\d{2}\.txt):(\d+),(-?\d+),(\d+),'
     match = re.match(pattern, data)
@@ -44,7 +62,7 @@ def evaluate_format(data):
         return data if data != '' else "ESP_OK"
 
 def save_data_to_file(data, file_path, filename):
-    Path(file_path).mkdir(mode=0o777, parents=True, exist_ok=True)
+    Path(file_path).mkdir(mode=777, parents=True, exist_ok=True)
     full_file_path = os.path.join(file_path, filename)
     with open(full_file_path, "a") as file:
         file.write(data)
@@ -53,16 +71,11 @@ stop_flag = threading.Event()
 
 
 def threaded_client(sock,msg):
-    invalid_count = 0
-    valid_count = 0
-    recuperated_count = 0
-    total = 0
     
     sock.setblocking(0)
     max_idle_time = 30  # s
     last_data_timestamp = time.time()
     aux_timestamp = 0
-    preverr = ''
     buffer = ''
     delimiter = '\n'
     while not stop_flag.is_set():
@@ -81,42 +94,28 @@ def threaded_client(sock,msg):
                 message, _, buffer = buffer.partition(delimiter)
                 if message == KEEPALIVE:
                     continue
-                total+=1
-                err = evaluate_format(message)
-                if err != "ESP_OK":
-                    invalid_count+=1
-                    print("preverr: ", preverr)
-                    print("err: ", err)
-                    print("result: ", preverr + err)
-                    err2= evaluate_format(preverr + err)
-                    if(err2 == 'ESP_OK'):
-                        print("recuperado: "+ preverr + err)
-                        recuperated_count+=1
-                else:
-                    valid_count+=1
                 
+                if(not store_tokens(message)):
+                    print("error: ", message)
+                  
 
         except (socket.error, ValueError):
             seconds_since_last_data = int(time.time() - last_data_timestamp)
 
            
             
-            if ((seconds_since_last_data %5)==0 and aux_timestamp != seconds_since_last_data):
-                print(f"{msg} - remaining idle time {sock.getpeername()} = {max_idle_time - seconds_since_last_data}s")
-                print("\n")
-                print(f"statistics for {msg[-5:]} = RECEIVED: {total} | VALID:{valid_count} | INVALID:{invalid_count} | REC:{recuperated_count}")
-                print(f"statistics for {msg[-5:]} = RECEIVED: {total} | VALID:{round(valid_count/max(total,1)*100,2)}% | INVALID:{round(invalid_count/max(total,1)*100,2)}% | REC:{round(recuperated_count/max(invalid_count,1)*100,2)}%")
-                print("\n")
-                
-
-            if(aux_timestamp != seconds_since_last_data):
+            if (aux_timestamp != seconds_since_last_data):
                 aux_timestamp = seconds_since_last_data
-            if seconds_since_last_data >= max_idle_time:
+                print("\n")
+                print(f"{msg[-5:]} - remaining idle time IP:{sock.getpeername()} = {max_idle_time - seconds_since_last_data}s")
+                print("\n")
+               
+            
+            if (seconds_since_last_data >= max_idle_time):
                 print("Idle time expired!")
                 break
 
     print(f"Closing socket {sock.getpeername()}")
-    # plot_data(data_points.values(), timestamps.values(), data_points.keys())
     
     sock.close()
 
