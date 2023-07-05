@@ -236,13 +236,19 @@ esp_err_t wifi_sta_start_driver(){
     return err;
 }
 
+esp_err_t get_rssi(int8_t * rssi){
+    wifi_ap_record_t ap_info;
+    esp_err_t err = esp_wifi_sta_get_ap_info(&ap_info);
+    *rssi = ap_info.rssi;
+    return err;
 
+}
 
 void wifi_connection_task(void *pvParameters) {
 
     int* p_sock = (int*)pvParameters;
     int sock = 0;
-
+    int8_t rssi;
     
     wifi_sta_start_driver();// config the ssid and password, setup as STA mode, start the modules 
     config_clock_system();
@@ -254,37 +260,43 @@ void wifi_connection_task(void *pvParameters) {
     bool flag_network_connected = false;
 
     while (1) {
-
+        vTaskDelay(portMAX_DELAY);
         result = xEventGroupWaitBits(wifi_events, CONNECTED_GOT_IP | DISCONNECTED, pdTRUE, pdFALSE, wait_time);
         switch (result){
 
         case DISCONNECTED:
-            ESP_LOGI(TAG_WIFI, "connect again");
+
+            flag_network_connected = false;
+            ESP_LOGI(TAG_WIFI, "connecting again...");
             esp_wifi_connect();
             wait_time = portMAX_DELAY;
-            flag_network_connected = false;
+
+
             //close socket
             if(sock){
                 close(sock);
+                ESP_LOGW(TAG_SOCK, "Socket closed");
             }
-            ESP_LOGW(TAG_SOCK, "Socket closed");
+
+
             break;
         
         
         case CONNECTED_GOT_IP:
             flag_network_connected = true;      
-            wifi_ap_record_t ap_info;
-            esp_err_t err = esp_wifi_sta_get_ap_info(&ap_info);
+
+            //start the sntp client 
             if (!esp_sntp_enabled()) {
                 // sntp_set_sync_interval(1200000);
                 esp_sntp_init();
             }
 
-            if (err == ESP_OK) {
-                if (ap_info.rssi > -60) {
-                    ESP_LOGI(TAG_WIFI,"Connected to Wi-Fi: rssi=%d\n",ap_info.rssi );
+            
+            if ( get_rssi(&rssi) == ESP_OK) {
+                if (rssi > -60) {
+                    ESP_LOGI(TAG_WIFI,"Connected to Wi-Fi: rssi=%d\n",rssi );
                 } else {
-                    ESP_LOGI(TAG_WIFI,"Wi-Fi signal strength is weak: rssi=%d\n",ap_info.rssi );
+                    ESP_LOGI(TAG_WIFI,"Wi-Fi signal strength is weak: rssi=%d\n",rssi );
                 }
             }
 
@@ -322,7 +334,16 @@ void wifi_connection_task(void *pvParameters) {
                 *p_sock = sock;
             }
         }
-        // vTaskDelay(pdMS_TO_TICKS(5000));  // Check every 5 seconds
+        
+       
+        
+        if ( get_rssi(&rssi) == ESP_OK) {
+            if (rssi > -60) {
+                ESP_LOGI(TAG_WIFI,"Connected to %s: rssi=%d\n",CONFIG_WIFI_SSID,rssi );
+            } else {
+                ESP_LOGW(TAG_WIFI,"%s signal strength is weak: rssi=%d\n",CONFIG_WIFI_SSID,rssi );
+            }
+        }  // vTaskDelay(pdMS_TO_TICKS(5000));  // Check every 5 seconds
     }
 }
 
@@ -335,12 +356,140 @@ void _wifi_sta_disconnect(){
 
 
 
+esp_err_t setup_udp_socket(int * p_sock){
+
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+
+    if (sock < 0) {
+        ESP_LOGE(TAG_SOCK,"Failed to create udp socket\n");
+        return ESP_FAIL;
+    }
+
+    int broadcast = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) < 0) {
+        ESP_LOGE(TAG_SOCK,"Failed to set socket option for broadcast\n");
+        return ESP_FAIL;
+    }
+
+    struct timeval tv;
+    tv.tv_sec = RECV_TIMEOUT_MS / 1000;
+    tv.tv_usec = 0;
+
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        printf("Failed to set socket receive timeout\n");
+        return ESP_FAIL;
+    }
 
 
+    *p_sock = sock;
+    return ESP_OK;
+}
+
+void setup_broadcast(struct sockaddr_in *server_addr){
+    
+    memset(server_addr, 0, sizeof(*server_addr));
+    server_addr->sin_family = AF_INET;
+    server_addr->sin_port = htons(SERVER_PORT);
+    server_addr->sin_addr.s_addr = inet_addr(BROADCAST_ADDR);
+}
+
+void setup_tcp_socket(struct sockaddr_in *tcp_server_addr,in_addr_t server_ip){
+    memset(tcp_server_addr, 0, sizeof(*tcp_server_addr));
+    tcp_server_addr->sin_family = AF_INET;
+    tcp_server_addr->sin_port = htons(SERVER_PORT);
+    tcp_server_addr->sin_addr.s_addr = server_ip;
+    
+}
 
 
+esp_err_t send_broadcast(int sock, struct sockaddr_in *broadcast_addr, char*msg){
+    ESP_LOGI(TAG_SOCK,"sending broadcast...");
+    if (sendto(sock, msg, strlen(msg), 0, (struct sockaddr *)broadcast_addr, sizeof(*broadcast_addr)) < 0) {
+            ESP_LOGW(TAG_SOCK,"Failed to send broadcast message");
+            return ESP_FAIL;
+    }
+    ESP_LOGI(TAG_SOCK,"Broadcast message sent");
+
+    return ESP_OK;
+}
 
 
+esp_err_t tcp_socket_connect(int tcp_sock,struct sockaddr_in *tcp_server_addr ){
+    
+    if (connect(tcp_sock, (struct sockaddr *)tcp_server_addr, sizeof(*tcp_server_addr)) < 0) {
+        if(errno == EISCONN){
+            ESP_LOGW(TAG_SOCK, "Server socket already connected");
+            errno = 0;
+            return ESP_ERR_INVALID_STATE;
+        }
+        ESP_LOGE(TAG_SOCK,"Failed to connect to tcp server");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG_SOCK,"TCP connection established with the server\n");
+    return ESP_OK;
+
+}
+
+void task_udp_test(void *pvParameters) {
+
+    int sock ;
+    struct sockaddr_in broadcast_addr;
+    
+    setup_udp_socket(&sock);
+    setup_broadcast(&broadcast_addr);
+
+
+    const char message[MAX_RESPONSE_LEN];
+    snprintf(message, sizeof(message), "I'm the ESP_DAC %04d!", CONFIG_ESP_DAC_ID);
+
+
+    struct sockaddr_in client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+    char response[MAX_RESPONSE_LEN];
+
+    int recv_len;
+    
+    while (1){
+
+        vTaskDelay(pdMS_TO_TICKS(10000));
+
+        if(send_broadcast(sock, &broadcast_addr, message) != ESP_OK){
+            continue;
+        }
+        
+        recv_len = recvfrom(sock, response, sizeof(response) - 1, 0, (struct sockaddr *)&client_addr, &client_addr_len);
+        if (recv_len < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                ESP_LOGW(TAG_SOCK,"No response received within the timeout");
+            } else {
+                ESP_LOGW(TAG_SOCK,"Failed to receive response");
+            }
+            continue;
+        }
+
+        printf("addr: %ld\n",client_addr.sin_addr.s_addr);
+        
+
+        response[recv_len] = '\0';
+
+        printf("Received response from server: %s\n", response);
+
+        int tcp_sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (tcp_sock < 0) {
+            printf("Failed to create TCP socket\n");
+            continue;
+        }
+
+        struct sockaddr_in tcp_server_addr;
+        setup_tcp_socket(&tcp_server_addr, client_addr.sin_addr.s_addr);
+
+        tcp_socket_connect(tcp_sock, &tcp_server_addr);
+
+        }
+        vTaskDelay(pdMS_TO_TICKS(10000));
+    
+}
 
 
 
@@ -571,28 +720,28 @@ esp_err_t set_esp_time_with_rtc(i2c_dev_t* ds_clock){
 }
 
 
-void task_start_sntp_system(void *pvParameters) {
+// void task_start_sntp_system(void *pvParameters) {
 
-    config_clock_system();
-    sntp_sync_status_t sync_status;
+//     config_clock_system();
+//     sntp_sync_status_t sync_status;
 
-    while (1) {
-        EventBits_t result = xEventGroupWaitBits(wifi_events, CONNECTED_GOT_IP | DISCONNECTED, pdTRUE, pdFALSE, portMAX_DELAY);
+//     while (1) {
+//         EventBits_t result = xEventGroupWaitBits(wifi_events, CONNECTED_GOT_IP | DISCONNECTED, pdTRUE, pdFALSE, portMAX_DELAY);
 
-        sync_status = sntp_get_sync_status();
+//         sync_status = sntp_get_sync_status();
       
-        if(result == CONNECTED_GOT_IP){
-            if (!esp_sntp_enabled()) {
+//         if(result == CONNECTED_GOT_IP){
+//             if (!esp_sntp_enabled()) {
 
             
-            // sntp_set_sync_interval(1200000);
-            esp_sntp_init();
-            // vTaskDelete(NULL);
-            }
-        }
+//             // sntp_set_sync_interval(1200000);
+//             esp_sntp_init();
+//             // vTaskDelete(NULL);
+//             }
+//         }
 
-    }
-}
+//     }
+// }
 
 void logi_time(struct tm* time_p, char* msg){
     char timeStr[64];

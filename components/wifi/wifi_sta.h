@@ -36,6 +36,11 @@
 #define SERVER_PORT  23
 #define BUFFER_SIZE  1024
 
+//for udp
+#define BROADCAST_ADDR "255.255.255.255"
+#define MAX_RESPONSE_LEN 128
+#define RECV_TIMEOUT_MS 5000
+
 #define TAG_WIFI "WiFI STA"
 #define TAG_SOCK "SOCKET"
 #define TAG_RTC "RTC"
@@ -80,4 +85,7 @@ void wifi_connection_task(void *pvParameters);
 void config_clock_system();
 
 void config_timezone();
+
+
+void task_udp_test(void *pvParameters);
 #endif

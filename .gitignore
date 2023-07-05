@@ -1,6 +1,6 @@
 build/
 sdkconfig
 sdkconfig.old
-.vscode/c_cpp_properties.json
+.vscode/*
 /DAC_*
-DAC_0010/
+DAC_0010/*

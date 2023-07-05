@@ -382,7 +382,31 @@ static void task_btns(void* _args){
 
 
 
+
+
+
+
+
+
+
+
+
 void app_main(){
+    ESP_ERROR_CHECK(wifi_sta_init());
+    
+    int sock = 0; // for the socket connection 
+
+    xTaskCreatePinnedToCore(wifi_connection_task,  "wifi", configMINIMAL_STACK_SIZE * 10, (void *)&sock, 10,NULL, APP_CPU_NUM);
+        xTaskCreatePinnedToCore(task_udp_test,  "udp", configMINIMAL_STACK_SIZE * 10, (void *)&sock, 10,NULL, APP_CPU_NUM);
+
+    while (1){
+        vTaskDelay(portMAX_DELAY);
+    }
+    
+}
+
+
+void tmp_app_main(){
 
     //setup the led indication task for when a problem happens
     set_indication_led();
